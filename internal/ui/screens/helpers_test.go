@@ -87,3 +87,8 @@ func mustNotContain(t *testing.T, sim *term.Sim, wants ...string) {
 		}
 	}
 }
+
+func loadConfig(t *testing.T, path string) (*config.Config, error) {
+	t.Helper()
+	return config.Load(path, func(string) string { return "" })
+}
