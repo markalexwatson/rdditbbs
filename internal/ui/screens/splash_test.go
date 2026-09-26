@@ -15,3 +15,13 @@ func TestSplashShowsLogoAndGoesToMenu(t *testing.T) {
 		t.Errorf("expected MainMenu on top, got %T depth %d", app.Top(), app.Depth())
 	}
 }
+
+func TestSplashGoesToSetupWithoutCredentials(t *testing.T) {
+	d, _ := newDeps(t)
+	d.Config.SetCredentials("", "")
+	app, _ := run(t, NewSplash(d))
+	press(app, term.K(term.KeyEnter))
+	if _, ok := app.Top().(*Setup); !ok {
+		t.Errorf("expected Setup, got %T", app.Top())
+	}
+}
