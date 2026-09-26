@@ -9,7 +9,7 @@ import (
 )
 
 // newPostList is indirected so this task compiles before Post List exists.
-var newPostList = func(d *Deps, area config.Area, saved bool) ui.Screen { return &placeholder{name: "post list"} }
+var newPostList = func(d *Deps, area config.Area, saved bool) ui.Screen { return NewPostList(d, area, saved) }
 
 // MainMenu is the top-level menu.
 type MainMenu struct {
