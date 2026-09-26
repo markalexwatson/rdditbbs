@@ -65,7 +65,7 @@
 | `internal/ui/widgets/textbox.go` | `TextBox`, `DrawLine` |
 | `internal/ui/widgets/tree.go` | `Connector` |
 | `internal/ui/threadmodel/model.go` | `Model`, `Row`: visible order, numbering, collapse, stub splicing |
-| `internal/ui/screens/deps.go` | `Deps`, `Rune` helper, confirm prompt helper |
+| `internal/ui/screens/deps.go` | `Deps`, `Rune`/`IsBack` helpers, `errText`, `openInBrowser`, `placeholder` screen |
 | `internal/ui/screens/splash.go`, `goodbye.go`, `mainmenu.go`, `arealist.go`, `setup.go`, `postlist.go`, `threadindex.go`, `reader.go` | One screen each |
 | `internal/ui/screens/smoke_test.go` | End-to-end key script through every screen |
 
@@ -667,6 +667,13 @@ func TestRenderStripsEscapes(t *testing.T) {
 	if got := LineText(d.Lines[0]); got != "safe red text here" {
 		t.Errorf("text = %q", got)
 	}
+	d = Render("title \x1b]0;evil\x07set \x1b]2;x\x1b\\done \x85 c1", 80)
+	if got := LineText(d.Lines[0]); got != "title set done  c1" {
+		t.Errorf("OSC/C1 text = %q", got)
+	}
+	if d := Render("日本", 1); len(d.Lines) != 1 || LineText(d.Lines[0]) != "日本" {
+		t.Errorf("tiny width = %q", texts(d))
+	}
 }
 
 func TestRenderHardBreaksLongURL(t *testing.T) {
@@ -769,7 +776,9 @@ func LineText(l Line) string {
 }
 
 var (
-	ansiRe    = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]`)
+	// CSI sequences, OSC sequences (terminated by BEL or ST), and any other
+	// two-byte escape.
+	ansiRe    = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b.`)
 	mdLinkRe  = regexp.MustCompile(`\[([^\]]+)\]\(([^)\s]+)\)`)
 	bareURLRe = regexp.MustCompile(`https?://[^\s<>()\[\]]+`)
 	boldRe    = regexp.MustCompile(`\*\*([^*]+)\*\*|__([^_]+)__`)
@@ -784,7 +793,7 @@ func sanitise(s string) string {
 	s = strings.ReplaceAll(s, "\t", "    ")
 	var b strings.Builder
 	for _, r := range s {
-		if r == '\n' || (r >= 0x20 && r != 0x7f) {
+		if r == '\n' || (r >= 0x20 && r != 0x7f && !(r >= 0x80 && r <= 0x9f)) {
 			b.WriteRune(r)
 		}
 	}
@@ -913,8 +922,10 @@ func boldSpans(s string, base Kind, lt *linkTable) []Span {
 			break
 		}
 		spans = appendText(spans, s[:m[0]], base, lt)
-		inner := s[m[2]:m[3]]
-		if m[2] < 0 {
+		inner := ""
+		if m[2] >= 0 {
+			inner = s[m[2]:m[3]]
+		} else {
 			inner = s[m[4]:m[5]]
 		}
 		spans = append(spans, Span{Text: inner, Kind: Bold})
@@ -1032,7 +1043,11 @@ func wrapSpans(spans []Span, w int) []Line {
 }
 
 // Render converts a Reddit markdown body into styled lines wrapped to w cells.
+// Widths below 4 are treated as 4 so prefixes and wide clusters always fit.
 func Render(md string, w int) Doc {
+	if w < 4 {
+		w = 4
+	}
 	lt := &linkTable{index: map[string]int{}}
 	var doc Doc
 	for i, b := range blocks(sanitise(md)) {
@@ -1398,6 +1413,28 @@ func TestTranslateKeys(t *testing.T) {
 	if k, _ := translate(tcell.NewEventKey(tcell.KeyRune, 'p', 0), true); !k.Paste {
 		t.Error("paste flag not set")
 	}
+	if k, _ := translate(tcell.NewEventKey(tcell.KeyEnter, 0, 0), true); !k.Paste {
+		t.Error("paste flag must be kept on special keys too")
+	}
+}
+
+func TestGridClipsAtEdges(t *testing.T) {
+	s := tcell.NewSimulationScreen("UTF-8")
+	if err := s.Init(); err != nil {
+		t.Fatal(err)
+	}
+	defer s.Fini()
+	s.SetSize(6, 2)
+	g := grid{s}
+	if n := g.Text(4, 0, "abcdef", Style{}, 10); n != 2 {
+		t.Errorf("Text at the edge used %d cells, want 2", n)
+	}
+	if n := g.Put(5, 0, "日", Style{}); n != 0 {
+		t.Errorf("wide cluster in the last column should not draw, got %d", n)
+	}
+	if n := g.Text(0, 5, "x", Style{}, 10); n != 0 {
+		t.Errorf("off-screen row drew %d", n)
+	}
 }
 
 func TestGridPutOnSimulationScreen(t *testing.T) {
@@ -1587,7 +1624,8 @@ func (g grid) set(x, y int, cluster string, st Style) {
 
 func (g grid) Put(x, y int, cluster string, st Style) int {
 	w := uniseg.StringWidth(cluster)
-	if w == 0 || cluster == "" {
+	sw, sh := g.s.Size()
+	if w == 0 || cluster == "" || x < 0 || y < 0 || y >= sh || x+w > sw {
 		return 0
 	}
 	g.set(x, y, cluster, st)
@@ -1595,6 +1633,13 @@ func (g grid) Put(x, y int, cluster string, st Style) int {
 }
 
 func (g grid) Text(x, y int, s string, st Style, maxWidth int) int {
+	sw, sh := g.s.Size()
+	if x < 0 || y < 0 || y >= sh {
+		return 0
+	}
+	if r := sw - x; maxWidth > r {
+		maxWidth = r
+	}
 	return drawText(func(cx int, cl string, _ int) { g.set(cx, y, cl, st) }, x, s, maxWidth)
 }
 
@@ -1666,7 +1711,7 @@ func translate(e *tcell.EventKey, paste bool) (Key, bool) {
 		return Key{Code: KeyRune, Rune: e.Rune(), Paste: paste}, true
 	}
 	if c, ok := codes[e.Key()]; ok {
-		return Key{Code: c}, true
+		return Key{Code: c, Paste: paste}, true
 	}
 	return Key{}, false
 }
@@ -2184,6 +2229,20 @@ func TestParseMoreChildrenErrors(t *testing.T) {
 	}
 }
 
+func TestThreadClone(t *testing.T) {
+	th, _ := ParseThread(open(t, "thread.json"))
+	c := th.Clone()
+	c.Comments[0].Children[0].Body = "changed"
+	c.Comments[0].More.IDs[0] = "changed"
+	c.Post.Title = "changed"
+	if th.Comments[0].Children[0].Body == "changed" || th.Comments[0].More.IDs[0] == "changed" || th.Post.Title == "changed" {
+		t.Error("Clone must not share comments, stubs or the post")
+	}
+	if c.Comments[2].More == nil || len(c.Comments) != 3 {
+		t.Error("Clone lost structure")
+	}
+}
+
 func TestSorts(t *testing.T) {
 	if Best.API() != "confidence" || TopComments.API() != "top" {
 		t.Error("comment sort API mapping")
@@ -2338,6 +2397,50 @@ type Thread struct {
 type Things struct {
 	Comments []*Comment
 	Stubs    []*MoreStub
+}
+
+// Clone deep-copies a thread so callers may mutate it freely.
+func (t Thread) Clone() Thread {
+	out := Thread{}
+	if t.Post != nil {
+		p := *t.Post
+		out.Post = &p
+	}
+	out.Comments = cloneComments(t.Comments)
+	out.More = t.More.clone()
+	return out
+}
+
+// Clone deep-copies morechildren results.
+func (th Things) Clone() Things {
+	out := Things{Comments: cloneComments(th.Comments)}
+	for _, s := range th.Stubs {
+		out.Stubs = append(out.Stubs, s.clone())
+	}
+	return out
+}
+
+func cloneComments(cs []*Comment) []*Comment {
+	if cs == nil {
+		return nil
+	}
+	out := make([]*Comment, len(cs))
+	for i, c := range cs {
+		cc := *c
+		cc.Children = cloneComments(c.Children)
+		cc.More = c.More.clone()
+		out[i] = &cc
+	}
+	return out
+}
+
+func (m *MoreStub) clone() *MoreStub {
+	if m == nil {
+		return nil
+	}
+	c := *m
+	c.IDs = append([]string(nil), m.IDs...)
+	return &c
 }
 
 // Store is what screens read from.
@@ -2773,6 +2876,11 @@ func Attach(t *Thread, stub *MoreStub, th Things) int {
 	for _, s := range th.Stubs {
 		for _, id := range s.IDs {
 			returned[id] = true
+		}
+		if existing := currentStub(t, index, s.ParentFullname); existing != nil && existing != stub {
+			existing.IDs = append(existing.IDs, s.IDs...)
+			existing.Count += s.Count
+			continue
 		}
 		setStub(s.ParentFullname, s)
 	}
@@ -3343,6 +3451,15 @@ func (g *RateGate) Release(h http.Header) {
 	}
 }
 
+// Reset clears the recorded limit after a 429 wait has elapsed, so the next
+// Acquire does not wait a second time for the old reset.
+func (g *RateGate) Reset() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.remaining = fallbackPerMinute
+	g.reset = time.Time{}
+}
+
 // WaitFor returns how long a 429 response asks us to wait: Retry-After, else
 // the ratelimit reset, else one second.
 func (g *RateGate) WaitFor(h http.Header) time.Duration {
@@ -3717,8 +3834,58 @@ func TestBodyLimit(t *testing.T) {
 		return true
 	}
 	c, _, _, _ := newTestClient(t, srv)
-	if _, err := c.Posts(context.Background(), "linux", Hot, "", Fetch{}); err == nil {
-		t.Error("oversized body should fail to parse, not hang")
+	_, err := c.Posts(context.Background(), "linux", Hot, "", Fetch{})
+	if err == nil || !strings.Contains(err.Error(), "larger than") {
+		t.Errorf("oversized body should be rejected, got %v", err)
+	}
+}
+
+func TestBadBodyNotCachedAndSinkCalled(t *testing.T) {
+	srv := &apiServer{t: t}
+	srv.handler = func(w http.ResponseWriter, r *http.Request, n int) bool {
+		if n == 1 {
+			fmt.Fprint(w, `{"kind":"Listing","data":{"children":[{"kind":"t3","data":"not an object"}]}}`)
+			return true
+		}
+		return false
+	}
+	c, _, _, _ := newTestClient(t, srv)
+	var got []byte
+	c.sink = func(b []byte) { got = b }
+	_, err := c.Posts(context.Background(), "linux", Hot, "", Fetch{})
+	var pe *ParseError
+	if !errors.As(err, &pe) {
+		t.Fatalf("want ParseError, got %v", err)
+	}
+	if !strings.Contains(string(got), "not an object") {
+		t.Errorf("sink did not receive the body: %q", got)
+	}
+	if _, err := c.Posts(context.Background(), "linux", Hot, "", Fetch{}); err != nil {
+		t.Errorf("second call should refetch, not serve the bad body: %v", err)
+	}
+	if len(srv.requests) != 2 {
+		t.Errorf("requests = %d, want 2", len(srv.requests))
+	}
+}
+
+func TestRetryAfterResetsGate(t *testing.T) {
+	srv := &apiServer{t: t}
+	srv.handler = func(w http.ResponseWriter, r *http.Request, n int) bool {
+		if n == 1 {
+			w.Header().Set("X-Ratelimit-Remaining", "0")
+			w.Header().Set("X-Ratelimit-Reset", "300")
+			w.Header().Set("Retry-After", "3")
+			w.WriteHeader(429)
+			return true
+		}
+		return false
+	}
+	c, _, _, sl := newTestClient(t, srv)
+	if _, err := c.Posts(context.Background(), "linux", Hot, "", Fetch{}); err != nil {
+		t.Fatal(err)
+	}
+	if len(sl.slept) != 1 || sl.slept[0] != 3*time.Second {
+		t.Errorf("should wait Retry-After only, slept %v", sl.slept)
 	}
 }
 ```
@@ -3762,6 +3929,12 @@ type Credentials struct {
 	ClientID, ClientSecret, UserAgent string
 }
 
+// ParseError is a 200 response whose body could not be decoded.
+type ParseError struct{ Err error }
+
+func (e *ParseError) Error() string { return "unexpected response from Reddit: " + e.Err.Error() }
+func (e *ParseError) Unwrap() error { return e.Err }
+
 // APIError is a non-2xx response.
 type APIError struct {
 	Status int
@@ -3786,6 +3959,7 @@ type Client struct {
 	now    func() time.Time
 	sleep  func(context.Context, time.Duration) error
 	onWait func(time.Duration)
+	sink   func([]byte) // receives bodies that failed to parse
 	moreMu sync.Mutex
 
 	tokenURL string
@@ -3811,6 +3985,9 @@ func WithSleep(s func(context.Context, time.Duration) error) Option { return fun
 
 // WithOnWait sets a callback invoked with the duration before any rate-limit wait.
 func WithOnWait(f func(time.Duration)) Option { return func(c *Client) { c.onWait = f } }
+
+// WithBadResponseSink receives (at most 64 KB of) any 200 body that fails to parse.
+func WithBadResponseSink(f func([]byte)) Option { return func(c *Client) { c.sink = f } }
 
 // NewClient builds a client with token handling, rate gating and caching.
 func NewClient(cr Credentials, opts ...Option) *Client {
@@ -3850,31 +4027,34 @@ func (c *Client) Posts(ctx context.Context, subreddit string, sort Sort, after s
 	if sort == Top {
 		q.Set("t", "day")
 	}
-	b, err := c.get(ctx, "/r/"+subreddit+"/"+string(sort), q, f.Fresh, listingTTL)
+	b, key, err := c.get(ctx, "/r/"+subreddit+"/"+string(sort), q, f.Fresh, listingTTL)
 	if err != nil {
 		return Listing{}, err
 	}
-	return ParseListing(bytes.NewReader(b))
+	l, err := ParseListing(bytes.NewReader(b))
+	return l, c.finish(key, b, listingTTL, err)
 }
 
 // Thread fetches a post and its comment forest.
 func (c *Client) Thread(ctx context.Context, subreddit, postID string, sort CommentSort, f Fetch) (Thread, error) {
 	q := url.Values{"sort": {sort.API()}, "limit": {"500"}, "depth": {"10"}}
-	b, err := c.get(ctx, "/r/"+subreddit+"/comments/"+postID, q, f.Fresh, threadTTL)
+	b, key, err := c.get(ctx, "/r/"+subreddit+"/comments/"+postID, q, f.Fresh, threadTTL)
 	if err != nil {
 		return Thread{}, err
 	}
-	return ParseThread(bytes.NewReader(b))
+	th, err := ParseThread(bytes.NewReader(b))
+	return th, c.finish(key, b, threadTTL, err)
 }
 
 // Subtree fetches the thread rooted at one comment.
 func (c *Client) Subtree(ctx context.Context, subreddit, postID, commentID string, sort CommentSort) (Thread, error) {
 	q := url.Values{"sort": {sort.API()}, "limit": {"500"}, "depth": {"10"}, "comment": {commentID}, "context": {"0"}}
-	b, err := c.get(ctx, "/r/"+subreddit+"/comments/"+postID, q, false, threadTTL)
+	b, key, err := c.get(ctx, "/r/"+subreddit+"/comments/"+postID, q, false, threadTTL)
 	if err != nil {
 		return Thread{}, err
 	}
-	return ParseThread(bytes.NewReader(b))
+	th, err := ParseThread(bytes.NewReader(b))
+	return th, c.finish(key, b, threadTTL, err)
 }
 
 // MoreChildren loads comments by ID in batches of 100, one request at a time.
@@ -3894,12 +4074,12 @@ func (c *Client) MoreChildren(ctx context.Context, linkFullname string, ids []st
 			"sort":     {sort.API()},
 			"api_type": {"json"},
 		}
-		b, err := c.get(ctx, "/api/morechildren", q, true, 0)
+		b, _, err := c.get(ctx, "/api/morechildren", q, true, 0)
 		if err != nil {
 			return all, err
 		}
 		th, err := ParseMoreChildren(bytes.NewReader(b))
-		if err != nil {
+		if err = c.finish("", b, 0, err); err != nil {
 			return all, err
 		}
 		all.Comments = append(all.Comments, th.Comments...)
@@ -3908,23 +4088,39 @@ func (c *Client) MoreChildren(ctx context.Context, linkFullname string, ids []st
 	return all, nil
 }
 
-// get performs a cached GET. ttl 0 disables caching.
-func (c *Client) get(ctx context.Context, path string, q url.Values, fresh bool, ttl time.Duration) ([]byte, error) {
+// get performs a GET, serving from cache unless fresh. It returns the body
+// and the cache key; the caller stores the body with finish once it parses.
+func (c *Client) get(ctx context.Context, path string, q url.Values, fresh bool, ttl time.Duration) ([]byte, string, error) {
 	q.Set("raw_json", "1")
 	u := c.base + path + "?" + q.Encode()
 	if !fresh && ttl > 0 {
 		if b, ok := c.cache.Get(u); ok {
-			return b, nil
+			return b, "", nil // already cached: finish must not re-store
 		}
 	}
 	b, err := c.do(ctx, u)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	if ttl > 0 {
-		c.cache.Put(u, b, ttl)
+	return b, u, nil
+}
+
+// finish caches a body that parsed successfully, or reports a parse failure
+// to the sink and wraps it as a ParseError. key "" means nothing to cache.
+func (c *Client) finish(key string, b []byte, ttl time.Duration, err error) error {
+	if err != nil {
+		if c.sink != nil {
+			if len(b) > 64<<10 {
+				b = b[:64<<10]
+			}
+			c.sink(b)
+		}
+		return &ParseError{Err: err}
 	}
-	return b, nil
+	if key != "" && ttl > 0 {
+		c.cache.Put(key, b, ttl)
+	}
+	return nil
 }
 
 // do sends one authenticated GET, refreshing the token once on 401 and
@@ -3951,9 +4147,12 @@ func (c *Client) do(ctx context.Context, u string) ([]byte, error) {
 			c.gate.Release(nil)
 			return nil, fmt.Errorf("request: %w", err)
 		}
-		body, readErr := io.ReadAll(io.LimitReader(resp.Body, maxBody))
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, maxBody+1))
 		resp.Body.Close()
 		c.gate.Release(resp.Header)
+		if readErr == nil && len(body) > maxBody {
+			readErr = fmt.Errorf("response larger than %d bytes", maxBody)
+		}
 		switch {
 		case resp.StatusCode == http.StatusOK:
 			return body, readErr
@@ -3969,6 +4168,7 @@ func (c *Client) do(ctx context.Context, u string) ([]byte, error) {
 			if err := c.sleep(ctx, wait); err != nil {
 				return nil, err
 			}
+			c.gate.Reset() // Retry-After takes precedence over the recorded reset
 		default:
 			return nil, &APIError{Status: resp.StatusCode, Reason: reason(body)}
 		}
@@ -4647,6 +4847,10 @@ func TestHotkeyBarAndPrompt(t *testing.T) {
 	if x, y, on := sim.Cursor(); !on || x != 13 || y != 1 {
 		t.Errorf("cursor = %d,%d,%v", x, y, on)
 	}
+	PromptLine(sim, 1, Prompt{Label: "Join area:", Input: "linux", Cursor: true, CursorPos: 2})
+	if x, _, _ := sim.Cursor(); x != 2+10+1+2 {
+		t.Errorf("cursor with offset = %d, want 15", x)
+	}
 	PromptLine(sim, 1, Prompt{Label: "Log off? (y/N)", Status: "boom", Error: true})
 	if !strings.HasPrefix(sim.Row(1), "  Log off? (y/N)") {
 		t.Errorf("label prompt = %q", sim.Row(1))
@@ -4801,6 +5005,9 @@ func TestTextInputEditing(t *testing.T) {
 	if in.Value != "?inUx" {
 		t.Errorf("pasted rune not inserted: %q", in.Value)
 	}
+	if in.HandleKey(term.Key{Code: term.KeyEnter, Paste: true}) != InputNone {
+		t.Error("a pasted Enter must not submit")
+	}
 }
 
 func TestTextInputMaskAndDraw(t *testing.T) {
@@ -4931,11 +5138,12 @@ type KeyHelp struct {
 
 // Prompt is the state of the bottom prompt line.
 type Prompt struct {
-	Label  string // defaults to "Command:"
-	Input  string
-	Status string
-	Error  bool // draw Status in the error style
-	Cursor bool // show the terminal cursor after Input
+	Label     string // defaults to "Command:"
+	Input     string
+	Status    string
+	Error     bool // draw Status in the error style
+	Cursor    bool // show the terminal cursor within Input
+	CursorPos int  // rune offset of the cursor in Input; 0 with Cursor set means the end
 }
 
 const logo = "R E D D I T   B B S"
@@ -4958,11 +5166,11 @@ func TitleBar(c term.Canvas, title, info string) {
 	x := 2
 	x += c.Text(x, 1, logo, theme.Style(theme.Logo), w)
 	x += c.Text(x, 1, " · ", theme.Style(theme.Meta), w)
-	avail := w - 3 - infoW - 1 - x
+	avail := w - 2 - infoW - 1 - x
 	if avail > 0 {
 		c.Text(x, 1, textfmt.Truncate(title, avail), theme.Style(theme.Subject), avail)
 	}
-	c.Text(w-3-infoW, 1, info, theme.Style(theme.Meta), infoW) // one space before the frame
+	c.Text(w-2-infoW, 1, info, theme.Style(theme.Meta), infoW) // ends one cell before the frame
 }
 
 // HotkeyBar draws [K]desc pairs across row y.
@@ -4993,9 +5201,15 @@ func PromptLine(c term.Canvas, y int, p Prompt) {
 	x := 2
 	x += c.Text(x, y, label, theme.Style(theme.Prompt), w)
 	x++
+	inputX := x
 	x += c.Text(x, y, p.Input, theme.Style(theme.Subject), w-x)
 	if p.Cursor {
-		c.ShowCursor(x, y)
+		rs := []rune(p.Input)
+		pos := p.CursorPos
+		if pos <= 0 || pos > len(rs) {
+			pos = len(rs)
+		}
+		c.ShowCursor(inputX+textfmt.Width(string(rs[:pos])), y)
 	} else {
 		c.HideCursor()
 	}
@@ -5178,11 +5392,16 @@ type TextInput struct {
 	Mask   bool
 }
 
-// HandleKey edits the value; every key is taken literally except Enter and Escape.
+// HandleKey edits the value; every key is taken literally except Enter and
+// Escape. A pasted Enter or Escape is ignored so a multi-line paste cannot
+// submit or cancel the field.
 func (t *TextInput) HandleKey(k term.Key) InputResult {
 	rs := []rune(t.Value)
 	if t.Cursor > len(rs) {
 		t.Cursor = len(rs)
+	}
+	if k.Paste && (k.Code == term.KeyEnter || k.Code == term.KeyEscape) {
+		return InputNone
 	}
 	switch k.Code {
 	case term.KeyRune:
@@ -5506,6 +5725,21 @@ func TestPopLastScreenQuits(t *testing.T) {
 	if !app.Quitting() {
 		t.Error("popping the last screen should quit")
 	}
+	app.Draw() // must not panic with an empty stack
+}
+
+func TestCloseCancelsOutstandingRuns(t *testing.T) {
+	cancelled := make(chan struct{})
+	root := &stub{name: "root"}
+	root.init = Run{Fn: func(ctx context.Context) Msg { <-ctx.Done(); close(cancelled); return nil }}
+	app, _ := newApp(root)
+	app.Close()
+	select {
+	case <-cancelled:
+	case <-time.After(time.Second):
+		t.Fatal("Close did not cancel the run context")
+	}
+	app.Close() // idempotent
 }
 
 func TestReplace(t *testing.T) {
@@ -5900,9 +6134,10 @@ func New(t term.Terminal, root Screen, opts ...Option) *App {
 	return a
 }
 
-// Run processes events until Quit or Ctrl-C, redrawing after each.
+// Run processes events until Quit or Ctrl-C, redrawing after each. It calls
+// Close on exit.
 func (a *App) Run() error {
-	defer close(a.done)
+	defer a.Close()
 	a.Draw()
 	for !a.quit {
 		select {
@@ -5917,6 +6152,19 @@ func (a *App) Run() error {
 		a.Draw()
 	}
 	return nil
+}
+
+// Close cancels every screen's outstanding work and releases workers. It is
+// safe to call more than once; tests that drive Handle and Pump call it in cleanup.
+func (a *App) Close() {
+	for _, en := range a.stack {
+		en.cancel()
+	}
+	select {
+	case <-a.done:
+	default:
+		close(a.done)
+	}
 }
 
 // Quitting reports whether a Quit has been applied.
@@ -6114,6 +6362,10 @@ func (a *App) start(en *entry, r Run) {
 func (a *App) Draw() {
 	a.t.Clear()
 	a.t.HideCursor()
+	if len(a.stack) == 0 {
+		a.t.Show()
+		return
+	}
 	if a.small() {
 		widgets.Centre(a.t, a.h/2, fmt.Sprintf("Please enlarge your terminal to at least %dx%d", a.minW, a.minH), theme.Style(theme.Error))
 		a.t.Show()
@@ -6422,6 +6674,8 @@ func SampleThread() reddit.Thread {
 package screens
 
 import (
+	"context"
+	"errors"
 	"regexp"
 	"strings"
 	"time"
@@ -6431,6 +6685,7 @@ import (
 	"github.com/markwatson/redditbbs/internal/reddit"
 	"github.com/markwatson/redditbbs/internal/session"
 	"github.com/markwatson/redditbbs/internal/term"
+	"github.com/markwatson/redditbbs/internal/ui"
 )
 
 // Deps is everything screens need from the outside. Shared by pointer so
@@ -6447,6 +6702,41 @@ type Deps struct {
 
 // SelectComment is the Pop result Message Reader hands back to Thread Index.
 type SelectComment struct{ ID string }
+
+// linkExit reports the browser opener's exit for a link a screen opened.
+type linkExit struct {
+	URL string
+	Err error
+}
+
+// openInBrowser starts the OS opener and returns a Run that reports its exit,
+// or nil when it could not start (the caller shows the URL in that case).
+func (d *Deps) openInBrowser(u string) (ui.Action, error) {
+	done := make(chan error, 1)
+	if err := d.Open(u, func(err error) { done <- err }); err != nil {
+		return nil, err
+	}
+	d.Session.LinksOpened++
+	return ui.Run{Fn: func(ctx context.Context) ui.Msg {
+		select {
+		case err := <-done:
+			return linkExit{URL: u, Err: err}
+		case <-ctx.Done():
+			return nil
+		}
+	}}, nil
+}
+
+// placeholder stands in for a screen a later task provides, so each task's
+// tests can assert that navigation left the current screen.
+type placeholder struct{ name string }
+
+func (p *placeholder) Init() ui.Action                   { return nil }
+func (p *placeholder) Draw(c term.Canvas)                { c.Text(2, 0, "placeholder: "+p.name, term.Style{}, 60) }
+func (p *placeholder) HandleKey(k term.Key) ui.Action    { return ui.Pop{} }
+func (p *placeholder) Update(ui.Msg) ui.Action           { return nil }
+func (p *placeholder) Title() string                     { return p.name }
+func (p *placeholder) Keys() []ui.KeyHelp                { return nil }
 
 // Rune returns the upper-cased rune of a typed (not pasted) rune key, else 0.
 func Rune(k term.Key) rune {
@@ -6475,12 +6765,25 @@ func (d *Deps) now() time.Time {
 	return time.Now()
 }
 
+// isAuthError reports a 401 so screens can offer the setup screen.
+func isAuthError(err error) bool {
+	var ae *reddit.APIError
+	return errors.As(err, &ae) && ae.Status == 401
+}
+
 // errText shortens an error for the status line.
 func errText(err error) string {
+	var pe *reddit.ParseError
+	if errors.As(err, &pe) {
+		return "Unexpected response from Reddit"
+	}
+	if errors.Is(err, context.Canceled) {
+		return "Cancelled"
+	}
 	if ae, ok := err.(*reddit.APIError); ok {
 		switch ae.Status {
 		case 401:
-			return "Credentials rejected"
+			return "Credentials rejected. Press L to log in again"
 		case 403:
 			if ae.Reason != "" {
 				return "Access denied (" + ae.Reason + ")"
@@ -7005,7 +7308,7 @@ import (
 )
 
 // newPostList is indirected so this task compiles before Post List exists.
-var newPostList = func(d *Deps, area config.Area, saved bool) ui.Screen { return NewMainMenu(d) }
+var newPostList = func(d *Deps, area config.Area, saved bool) ui.Screen { return &placeholder{name: "post list"} }
 
 // MainMenu is the top-level menu.
 type MainMenu struct {
@@ -7031,7 +7334,7 @@ func (m *MainMenu) Prompt() widgets.Prompt {
 	case m.confirm:
 		return widgets.Prompt{Label: "Log off? (y/N)"}
 	case m.join != nil:
-		return widgets.Prompt{Label: "Join area:", Input: m.join.Display(), Cursor: true}
+		return widgets.Prompt{Label: "Join area:", Input: m.join.Display(), Cursor: true, CursorPos: m.join.Cursor}
 	}
 	return widgets.Prompt{Status: m.status, Error: m.statusErr}
 }
@@ -7088,6 +7391,9 @@ func (m *MainMenu) HandleKey(k term.Key) ui.Action {
 			m.join = nil
 		}
 		return nil
+	}
+	if k.Paste {
+		return nil // pasted text outside a field is not a command
 	}
 	switch {
 	case Rune(k) == 'M':
@@ -7238,7 +7544,7 @@ package screens
 import "github.com/markwatson/redditbbs/internal/ui"
 
 // NewSetup is replaced by the real New User Setup screen in Task 17.
-func NewSetup(d *Deps) ui.Screen { return NewMainMenu(d) }
+func NewSetup(d *Deps) ui.Screen { return &placeholder{name: "setup"} }
 ```
 
 - [ ] **Step 6: Run tests**
@@ -7275,13 +7581,16 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 package screens
 
 import (
+	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/markwatson/redditbbs/internal/config"
 	"github.com/markwatson/redditbbs/internal/reddit"
 	"github.com/markwatson/redditbbs/internal/reddit/redditest"
 	"github.com/markwatson/redditbbs/internal/term"
+	"github.com/markwatson/redditbbs/internal/ui"
 )
 
 func setupDeps(t *testing.T) (*Deps, *redditest.FakeStore) {
@@ -7366,6 +7675,30 @@ func TestSetupEmptyFieldsAndEscape(t *testing.T) {
 	}
 }
 
+func TestSetupNestedPopsOnSuccessAndEscape(t *testing.T) {
+	d, _ := setupDeps(t)
+	s := NewNestedSetup(d)
+	if act := s.HandleKey(term.K(term.KeyEscape)); act != (ui.Pop{}) {
+		t.Errorf("nested Escape should Pop, got %#v", act)
+	}
+	s.id.Value, s.secret.Value = "myid", "mysecret"
+	msg := s.submit().(ui.Run).Fn(context.Background())
+	if act := s.Update(msg); act != (ui.Pop{}) {
+		t.Errorf("nested success should Pop, got %#v", act)
+	}
+}
+
+func TestSetupWorkerPanicClearsBusy(t *testing.T) {
+	d, _ := setupDeps(t)
+	s := NewSetup(d)
+	s.id.Value, s.secret.Value = "myid", "mysecret"
+	s.submit()
+	s.Update(ui.ErrMsg{Err: errors.New("internal error: boom")})
+	if s.busy || !strings.Contains(s.status, "boom") {
+		t.Errorf("busy=%v status=%q", s.busy, s.status)
+	}
+}
+
 func TestSetupWithoutMakeStore(t *testing.T) {
 	d, _ := setupDeps(t)
 	d.MakeStore = nil
@@ -7419,9 +7752,11 @@ import (
 
 var errNoStoreFactory = errors.New("no store factory configured")
 
-// Setup collects and verifies app credentials on first run.
+// Setup collects and verifies app credentials on first run, or again after a
+// 401 when pushed from another screen (nested).
 type Setup struct {
 	d          *Deps
+	nested     bool
 	id, secret widgets.TextInput
 	focus      int
 	busy       bool
@@ -7437,10 +7772,19 @@ type setupMsg struct {
 	err   error
 }
 
-// NewSetup creates the setup screen.
+// NewSetup creates the first-run setup screen, which replaces itself with the
+// Main Menu on success.
 func NewSetup(d *Deps) *Setup {
 	s := &Setup{d: d}
 	s.secret.Mask = true
+	return s
+}
+
+// NewNestedSetup creates a setup screen pushed over another screen; on
+// success it pops back with a nil result and on Escape it pops.
+func NewNestedSetup(d *Deps) *Setup {
+	s := NewSetup(d)
+	s.nested = true
 	return s
 }
 
@@ -7452,7 +7796,7 @@ func (s *Setup) Keys() []ui.KeyHelp {
 }
 
 func (s *Setup) Prompt() widgets.Prompt {
-	if s.busy {
+	if s.busy && s.status == "" {
 		return widgets.Prompt{Status: "Checking credentials with Reddit..."}
 	}
 	return widgets.Prompt{Status: s.status, Error: s.statusErr}
@@ -7490,7 +7834,10 @@ func (s *Setup) Draw(c term.Canvas) {
 }
 
 func (s *Setup) HandleKey(k term.Key) ui.Action {
-	if k.Code == term.KeyEscape {
+	if k.Code == term.KeyEscape && !k.Paste {
+		if s.nested {
+			return ui.Pop{}
+		}
 		return ui.Quit{}
 	}
 	if s.busy {
@@ -7529,6 +7876,7 @@ func (s *Setup) submit() ui.Action {
 	}
 	store := s.d.MakeStore(id, secret)
 	s.busy = true
+	s.status, s.statusErr = "", false
 	s.gen++
 	gen := s.gen
 	return ui.Run{Fn: func(ctx context.Context) ui.Msg {
@@ -7566,7 +7914,14 @@ func (s *Setup) Update(msg ui.Msg) ui.Action {
 			s.status, s.statusErr = "Could not save config: "+errText(err), true
 			return nil
 		}
+		if s.nested {
+			return ui.Pop{}
+		}
 		return ui.Replace{Screen: NewMainMenu(s.d)}
+	case ui.ErrMsg:
+		s.busy = false
+		s.lastErr = m.Err
+		s.status, s.statusErr = errText(m.Err), true
 	case ui.RateLimited:
 		s.status, s.statusErr = "Rate limited, retrying in "+itoa(int(m.Wait.Seconds()))+"s", false
 	}
@@ -7795,6 +8150,67 @@ func TestPostListOpenLink(t *testing.T) {
 	}
 }
 
+func TestPostListNumberOutsidePage(t *testing.T) {
+	app, sim, _, _ := postListWith(t, 20)
+	press(app, term.R('0'), term.K(term.KeyEnter))
+	mustContain(t, sim, "No such message")
+	press(app, term.R('1'), term.R('8'), term.K(term.KeyEnter))
+	if _, ok := app.Top().(*PostList); !ok {
+		t.Error("18 is not on a 17-row page and must not open the next page's post")
+	}
+	press(app, term.R('n'), term.R('4'), term.K(term.KeyEnter))
+	if _, ok := app.Top().(*PostList); !ok {
+		t.Error("page 2 has three posts; 4 must be rejected")
+	}
+}
+
+func TestPostListRefreshKeepsSelection(t *testing.T) {
+	app, sim, _, fs := postListWith(t, 5)
+	press(app, term.K(term.KeyDown), term.K(term.KeyDown))
+	fs.Listings["linux/hot/"] = redditest.SampleListing(6, "")
+	press(app, term.R('r'))
+	pump(t, app)
+	mustContain(t, sim, "Post 6")
+	if _, st := sim.CellAt(4, 7); st != theme.Style(theme.Cursor) {
+		t.Error("refresh should keep the cursor on Post 3")
+	}
+}
+
+func TestPostListSortFailureRestoresSort(t *testing.T) {
+	app, sim, _, fs := postListWith(t, 2)
+	fs.Err = &reddit.APIError{Status: 500}
+	press(app, term.R('s'))
+	mustContain(t, sim, "NEW")
+	pump(t, app)
+	mustContain(t, sim, "HOT", "Post 1")
+	mustNotContain(t, sim, "NEW")
+}
+
+func TestPostListAuthFailureOffersLogin(t *testing.T) {
+	app, sim, d, fs := postListWith(t, 2)
+	fs.Err = &reddit.APIError{Status: 401}
+	press(app, term.R('r'))
+	pump(t, app)
+	mustContain(t, sim, "Credentials rejected", "[L]og in")
+	press(app, term.R('l'))
+	if _, ok := app.Top().(*Setup); !ok {
+		t.Fatalf("L should push setup, got %T", app.Top())
+	}
+	fs.Err = nil
+	d.MakeStore = func(id, secret string) reddit.Store { return fs }
+	typeString(app, "id2")
+	press(app, term.K(term.KeyTab))
+	typeString(app, "sec2")
+	press(app, term.K(term.KeyEnter))
+	pump(t, app) // setup verifies and pops
+	if _, ok := app.Top().(*PostList); !ok {
+		t.Fatalf("expected PostList after setup, got %T", app.Top())
+	}
+	pump(t, app) // post list refetches on return
+	mustContain(t, sim, "Post 1")
+	mustNotContain(t, sim, "Credentials rejected")
+}
+
 func TestPostListStaleResultIgnored(t *testing.T) {
 	app, sim, _, fs := postListWith(t, 1)
 	fs.Listings["linux/new/"] = reddit.Listing{Posts: []*reddit.Post{redditest.SamplePost("n1", "New 1")}}
@@ -7832,27 +8248,30 @@ import (
 )
 
 // newThreadIndex is indirected so this task compiles before Thread Index exists.
-var newThreadIndex = func(d *Deps, p *reddit.Post) ui.Screen { return NewMainMenu(d) }
+var newThreadIndex = func(d *Deps, p *reddit.Post) ui.Screen { return &placeholder{name: "thread index"} }
 
 // PostList shows one subreddit's posts, paginated to the screen height.
 type PostList struct {
-	d     *Deps
-	area  config.Area
-	saved bool
-	sort  reddit.Sort
+	d       *Deps
+	area    config.Area
+	saved   bool
+	sort    reddit.Sort // committed: the sort the loaded posts have
+	reqSort reddit.Sort // requested: shown in the title while a sort change loads
 
 	posts  []*reddit.Post
 	seen   map[string]bool
 	after  string
 	ended  bool
 	cursor int
-	rows   int // data rows per page, set on Draw
+	rows   int // data rows per page
 
 	num  widgets.NumInput
 	join *widgets.TextInput
 
 	loading        bool
 	pendingAdvance bool
+	keepID         string // reselect this post after a replacing fetch
+	authFailed     bool
 	gen            int
 	status         string
 	statusErr      bool
@@ -7860,6 +8279,8 @@ type PostList struct {
 
 type postsMsg struct {
 	gen     int
+	sort    reddit.Sort
+	after   string
 	listing reddit.Listing
 	err     error
 	replace bool
@@ -7872,6 +8293,7 @@ func NewPostList(d *Deps, area config.Area, saved bool) *PostList {
 	if s.sort == "" {
 		s.sort = reddit.Hot
 	}
+	s.reqSort = s.sort
 	return s
 }
 
@@ -7883,13 +8305,16 @@ func (s *PostList) Init() ui.Action {
 func (s *PostList) Title() string { return "Message Area" }
 
 func (s *PostList) Info() string {
-	return fmt.Sprintf("r/%s · %s · Page %d", s.area.Subreddit, strings.ToUpper(string(s.sort)), s.page()+1)
+	return fmt.Sprintf("r/%s · %s · Page %d", s.area.Subreddit, strings.ToUpper(string(s.reqSort)), s.page()+1)
 }
 
 func (s *PostList) Keys() []ui.KeyHelp {
 	keys := []ui.KeyHelp{{"#/⏎", "Read"}, {"N", "ext"}, {"P", "rev"}, {"S", "ort"}, {"J", "oin"}}
 	if !s.saved {
 		keys = append(keys, ui.KeyHelp{Key: "A", Desc: "dd area"})
+	}
+	if s.authFailed {
+		keys = append(keys, ui.KeyHelp{Key: "L", Desc: "og in"})
 	}
 	return append(keys, ui.KeyHelp{Key: "O", Desc: "pen link"}, ui.KeyHelp{Key: "R", Desc: "efresh"}, ui.KeyHelp{Key: "Q", Desc: "uit"})
 }
@@ -7898,17 +8323,34 @@ func (s *PostList) CapturesKeys() bool { return s.join != nil }
 
 func (s *PostList) Prompt() widgets.Prompt {
 	if s.join != nil {
-		return widgets.Prompt{Label: "Join area:", Input: s.join.Display(), Cursor: true}
+		return widgets.Prompt{Label: "Join area:", Input: s.join.Display(), Cursor: true, CursorPos: s.join.Cursor}
 	}
 	return widgets.Prompt{Input: s.num.Digits, Status: s.status, Error: s.statusErr}
 }
 
 func (s *PostList) page() int { return s.cursor / s.rows }
 
-func (s *PostList) clamp() {
-	if s.rows < 1 {
-		s.rows = 1
+// rowsOnPage is how many posts the current page shows.
+func (s *PostList) rowsOnPage() int {
+	n := len(s.posts) - s.page()*s.rows
+	if n > s.rows {
+		n = s.rows
 	}
+	if n < 0 {
+		n = 0
+	}
+	return n
+}
+
+func (s *PostList) setRows(rows int) {
+	if rows < 1 {
+		rows = 1
+	}
+	s.rows = rows
+	s.clamp()
+}
+
+func (s *PostList) clamp() {
 	if s.cursor >= len(s.posts) {
 		s.cursor = len(s.posts) - 1
 	}
@@ -7917,16 +8359,22 @@ func (s *PostList) clamp() {
 	}
 }
 
-// fetch starts a listing request; replace discards loaded posts on arrival.
+// fetch starts a listing request. replace discards loaded posts on arrival
+// and uses the requested sort; a paging fetch uses the committed sort.
 func (s *PostList) fetch(after string, replace, fresh bool) ui.Action {
 	s.gen++
 	gen := s.gen
 	s.loading = true
 	s.status, s.statusErr = "Retrieving...", false
-	store, sub, sort := s.d.Store, s.area.Subreddit, s.sort
+	sort := s.sort
+	if replace {
+		s.pendingAdvance = false
+		sort = s.reqSort
+	}
+	store, sub := s.d.Store, s.area.Subreddit
 	return ui.Run{Fn: func(ctx context.Context) ui.Msg {
 		l, err := store.Posts(ctx, sub, sort, after, reddit.Fetch{Fresh: fresh})
-		return postsMsg{gen: gen, listing: l, err: err, replace: replace}
+		return postsMsg{gen: gen, sort: sort, after: after, listing: l, err: err, replace: replace}
 	}}
 }
 
@@ -7940,22 +8388,25 @@ func (s *PostList) Update(msg ui.Msg) ui.Action {
 		advance := s.pendingAdvance
 		s.pendingAdvance = false
 		if m.err != nil {
+			s.reqSort = s.sort // a failed sort change leaves the old sort in force
+			s.keepID = ""
+			s.authFailed = isAuthError(m.err)
 			s.status, s.statusErr = errText(m.err), true
 			return nil
 		}
+		s.authFailed = false
 		if m.replace {
 			s.posts, s.seen, s.cursor, s.ended, s.after = nil, map[string]bool{}, 0, false, ""
+			s.sort = m.sort
 		}
 		wasPage := s.page()
-		added := 0
 		for _, p := range m.listing.Posts {
 			if !s.seen[p.ID] {
 				s.seen[p.ID] = true
 				s.posts = append(s.posts, p)
-				added++
 			}
 		}
-		if m.listing.After == "" || m.listing.After == s.after || added == 0 {
+		if m.listing.After == "" || m.listing.After == m.after {
 			s.ended = true
 		}
 		s.after = m.listing.After
@@ -7963,14 +8414,39 @@ func (s *PostList) Update(msg ui.Msg) ui.Action {
 		if len(s.posts) == 0 {
 			s.status = "No messages"
 		}
+		if m.replace && s.keepID != "" {
+			for i, p := range s.posts {
+				if p.ID == s.keepID {
+					s.cursor = i
+				}
+			}
+		}
+		s.keepID = ""
 		if advance {
 			if next := (wasPage + 1) * s.rows; next < len(s.posts) {
 				s.cursor = next
+			} else if s.ended {
+				s.status = "End of messages"
 			}
 		}
 		s.clamp()
+	case ui.ErrMsg:
+		s.loading = false
+		s.pendingAdvance = false
+		s.reqSort = s.sort
+		s.status, s.statusErr = errText(m.Err), true
+	case linkExit:
+		if m.Err != nil {
+			s.status, s.statusErr = "Browser exited with an error. URL: "+m.URL, true
+		}
+	case ui.Resize:
+		s.setRows(m.H - widgets.ChromeRows - 2)
 	case ui.PopResult:
 		s.status, s.statusErr = "", false
+		if s.authFailed && s.d.Config.HasCredentials() {
+			s.authFailed = false
+			return s.fetch("", true, true)
+		}
 	case ui.RateLimited:
 		s.status, s.statusErr = fmt.Sprintf("Rate limited, retrying in %ds", int(m.Wait.Seconds())), false
 	}
@@ -7979,9 +8455,8 @@ func (s *PostList) Update(msg ui.Msg) ui.Action {
 
 func (s *PostList) Draw(c term.Canvas) {
 	w, h := c.Size()
-	if rows := h - 2; rows != s.rows {
-		s.rows = rows
-		s.clamp()
+	if h-2 != s.rows {
+		s.setRows(h - 2)
 	}
 	if len(s.posts) == 0 {
 		if !s.loading {
@@ -8077,8 +8552,15 @@ func (s *PostList) HandleKey(k term.Key) ui.Action {
 		}
 		return nil
 	}
+	if k.Paste {
+		return nil
+	}
 	if v, submitted, handled := s.num.HandleKey(k); handled {
 		if submitted {
+			if v < 1 || v > s.rowsOnPage() {
+				s.status, s.statusErr = "No such message", true
+				return nil
+			}
 			return s.open(s.page()*s.rows + v - 1)
 		}
 		return nil
@@ -8110,15 +8592,22 @@ func (s *PostList) HandleKey(k term.Key) ui.Action {
 			s.cursor = (s.page() - 1) * s.rows
 		}
 	case Rune(k) == 'S':
-		s.sort = s.sort.Next()
+		s.reqSort = s.reqSort.Next()
 		return s.fetch("", true, false)
 	case Rune(k) == 'J':
 		s.join = &widgets.TextInput{}
 	case Rune(k) == 'A':
 		s.addArea()
+	case Rune(k) == 'L':
+		if s.authFailed {
+			return ui.Push{Screen: NewNestedSetup(s.d)}
+		}
 	case Rune(k) == 'O':
-		s.openLink()
+		return s.openLink()
 	case Rune(k) == 'R':
+		if len(s.posts) > 0 {
+			s.keepID = s.posts[s.cursor].ID
+		}
 		return s.fetch("", true, true)
 	case IsBack(k):
 		return ui.Pop{}
@@ -8135,7 +8624,10 @@ func (s *PostList) move(delta int) ui.Action {
 	target := s.cursor + delta
 	if target >= len(s.posts) {
 		s.cursor = len(s.posts) - 1
-		if !s.ended && !s.loading {
+		switch {
+		case s.ended:
+			s.status, s.statusErr = "End of messages", false
+		case !s.loading:
 			return s.fetch(s.after, false, false)
 		}
 		return nil
@@ -8176,14 +8668,12 @@ func (s *PostList) open(i int) ui.Action {
 	return ui.Push{Screen: newThreadIndex(s.d, s.posts[i])}
 }
 
+// addArea adds the area to the config and saves; a failed save can be retried.
 func (s *PostList) addArea() {
 	if s.saved {
 		return
 	}
-	if !s.d.Config.AddArea(s.area) {
-		s.saved = true
-		return
-	}
+	s.d.Config.AddArea(s.area)
 	if err := s.d.Config.Save(); err != nil {
 		s.status, s.statusErr = "Could not save config: "+errText(err), true
 		return
@@ -8192,21 +8682,22 @@ func (s *PostList) addArea() {
 	s.status, s.statusErr = "Area saved", false
 }
 
-func (s *PostList) openLink() {
+func (s *PostList) openLink() ui.Action {
 	if len(s.posts) == 0 {
-		return
+		return nil
 	}
 	p := s.posts[s.cursor]
 	u := p.URL
 	if p.IsSelf || u == "" {
 		u = "https://www.reddit.com" + p.Permalink
 	}
-	if err := s.d.Open(u, nil); err != nil {
+	act, err := s.d.openInBrowser(u)
+	if err != nil {
 		s.status, s.statusErr = "Could not open browser. URL: "+u, true
-		return
+		return nil
 	}
-	s.d.Session.LinksOpened++
 	s.status, s.statusErr = "Opened in browser", false
+	return act
 }
 ```
 
@@ -8219,7 +8710,7 @@ var newPostList = func(d *Deps, area config.Area, saved bool) ui.Screen { return
 - [ ] **Step 4: Run tests**
 
 Run: `go test ./internal/ui/screens/`
-Expected: PASS. Notes for failures: `TestPostListDownAtEndFetchesMore` checks terminal row 7 (content row 4, the third data row). `TestPostListResizeClampsCursor` at 80x12 has content height 7 and 5 data rows, so post 20 (index 19) is on page 4 (index 3).
+Expected: PASS. Notes for failures: `TestPostListDownAtEndFetchesMore` checks terminal row 7 (content row 4, the third data row). `TestPostListAuthFailureOffersLogin` needs `NewNestedSetup` from Task 17 and the fake's `Err` cleared before setup verifies. `TestPostListResizeClampsCursor` at 80x12 has content height 7 and 5 data rows, so post 20 (index 19) is on page 4 (index 3).
 
 - [ ] **Step 5: Commit**
 
@@ -8415,6 +8906,27 @@ func TestDepthCap(t *testing.T) {
 	}
 }
 
+func TestNewClonesInput(t *testing.T) {
+	th := redditest.SampleThread()
+	m := New(th, 10)
+	m.Attach(m.Find("c1").More, reddit.Things{Comments: []*reddit.Comment{{ID: "x", Fullname: "t1_x", ParentFullname: "t1_c1"}}})
+	if len(th.Comments[0].Children) != 1 || th.Comments[0].More == nil {
+		t.Error("model mutation leaked into the input thread")
+	}
+}
+
+func TestReveal(t *testing.T) {
+	m := New(redditest.SampleThread(), 10)
+	m.Toggle("c1")
+	if m.IndexOf("c2") != -1 {
+		t.Fatal("c2 should be hidden")
+	}
+	m.Reveal("c2")
+	if m.IsCollapsed("c1") || m.IndexOf("c2") != 1 {
+		t.Error("Reveal should expand c1")
+	}
+}
+
 func TestParentIndexOfAndReplace(t *testing.T) {
 	m := New(redditest.SampleThread(), 10)
 	c2 := m.Find("c2")
@@ -8474,9 +8986,10 @@ type Model struct {
 	maxDepth  int
 }
 
-// New wraps t. maxDepth is the deepest level drawn with its own indent.
+// New deep-copies t so the Store's value is never mutated. maxDepth is the
+// deepest level drawn with its own indent.
 func New(t reddit.Thread, maxDepth int) *Model {
-	m := &Model{thread: t, collapsed: map[string]bool{}}
+	m := &Model{thread: t.Clone(), collapsed: map[string]bool{}}
 	m.SetMaxDepth(maxDepth)
 	return m
 }
@@ -8495,9 +9008,10 @@ func (m *Model) Thread() *reddit.Thread { return &m.thread }
 // Post is the thread's post.
 func (m *Model) Post() *reddit.Post { return m.thread.Post }
 
-// Replace swaps in a refetched thread, keeping collapse state for ids that survive.
+// Replace swaps in a copy of a refetched thread, keeping collapse state for
+// ids that survive.
 func (m *Model) Replace(t reddit.Thread) {
-	m.thread = t
+	m.thread = t.Clone()
 	alive := map[string]bool{}
 	m.walk(func(c *reddit.Comment) { alive[c.ID] = true })
 	for id := range m.collapsed {
@@ -8555,6 +9069,13 @@ func (m *Model) Toggle(id string) bool {
 
 // IsCollapsed reports collapse state.
 func (m *Model) IsCollapsed(id string) bool { return m.collapsed[id] }
+
+// Reveal expands every collapsed ancestor of id so it becomes visible.
+func (m *Model) Reveal(id string) {
+	for c := m.Parent(m.Find(id)); c != nil; c = m.Parent(c) {
+		delete(m.collapsed, c.ID)
+	}
+}
 
 func countDescendants(c *reddit.Comment) int {
 	n := 0
@@ -8630,9 +9151,9 @@ func (m *Model) IndexOf(id string) int {
 	return -1
 }
 
-// Attach splices morechildren results for stub into the tree.
+// Attach splices a copy of morechildren results for stub into the tree.
 func (m *Model) Attach(stub *reddit.MoreStub, th reddit.Things) int {
-	return reddit.Attach(&m.thread, stub, th)
+	return reddit.Attach(&m.thread, stub, th.Clone())
 }
 
 // ReplaceSubtree replaces comment id's children with those of the matching
@@ -8642,6 +9163,7 @@ func (m *Model) ReplaceSubtree(id string, sub reddit.Thread) bool {
 	if target == nil {
 		return false
 	}
+	sub = sub.Clone()
 	var root *reddit.Comment
 	for _, c := range sub.Comments {
 		if c.ID == id {
@@ -8823,9 +9345,39 @@ func TestThreadIndexSortRefetchAndInfo(t *testing.T) {
 func TestThreadIndexErrorKeepsRows(t *testing.T) {
 	app, sim, _, fs, _ := threadIndexUp(t)
 	fs.Err = &reddit.APIError{Status: 500}
+	press(app, term.R('s'))
+	mustContain(t, sim, "TOP")
+	pump(t, app)
+	mustContain(t, sim, "sched_nerd", "Reddit is having trouble", "BEST")
+	mustNotContain(t, sim, "TOP")
+}
+
+func TestThreadIndexRefreshUpdatesPost(t *testing.T) {
+	app, sim, _, fs, _ := threadIndexUp(t)
+	th := redditest.SampleThread()
+	th.Post.Title = "Kernel 7.2 released (updated)"
+	th.Post.NumComments = 400
+	fs.Threads["aaa"] = th
 	press(app, term.R('r'))
 	pump(t, app)
-	mustContain(t, sim, "sched_nerd", "Reddit is having trouble")
+	mustContain(t, sim, "(updated)", "400 msgs")
+}
+
+func TestThreadIndexResizeRebuildsConnectors(t *testing.T) {
+	d, fs := newDeps(t)
+	th := redditest.SampleThread()
+	fs.Threads["aaa"] = th
+	ti := NewThreadIndex(d, th.Post)
+	sim := term.NewSim(80, 24)
+	app := ui.New(sim, ti, ui.WithMinSize(20, 10))
+	app.Draw()
+	pump(t, app)
+	sim.Resize(24, 24) // cap becomes 3
+	app.Handle(<-sim.Events())
+	app.Draw()
+	if ti.cap != 3 {
+		t.Errorf("cap = %d", ti.cap)
+	}
 }
 
 func TestThreadIndexSelfPostPreviewAndBody(t *testing.T) {
@@ -8883,7 +9435,7 @@ import (
 )
 
 // newReader is indirected so this task compiles before Message Reader exists.
-var newReader = func(d *Deps, m *threadmodel.Model, commentID string) ui.Screen { return NewMainMenu(d) }
+var newReader = func(d *Deps, m *threadmodel.Model, commentID string) ui.Screen { return &placeholder{name: "reader"} }
 
 const (
 	minTableRows = 5
@@ -8894,12 +9446,14 @@ const (
 
 // ThreadIndex lists a post's comments as a tree with a peek pane.
 type ThreadIndex struct {
-	d    *Deps
-	post *reddit.Post
-	sort reddit.CommentSort
+	d       *Deps
+	post    *reddit.Post
+	sort    reddit.CommentSort // committed
+	reqSort reddit.CommentSort // requested, shown while loading
 
 	model *threadmodel.Model
 	rows  []threadmodel.Row
+	cap   int // indent cap the rows were built with
 	table widgets.Table
 	num   widgets.NumInput
 
@@ -8909,15 +9463,17 @@ type ThreadIndex struct {
 
 	selectedID string
 	loading    bool
+	authFailed bool
 	gen        int
 	status     string
 	statusErr  bool
 }
 
 type threadMsg struct {
-	gen int
-	th  reddit.Thread
-	err error
+	gen  int
+	sort reddit.CommentSort
+	th   reddit.Thread
+	err  error
 }
 
 type moreMsg struct {
@@ -8936,7 +9492,7 @@ type subtreeMsg struct {
 
 // NewThreadIndex creates the index for post.
 func NewThreadIndex(d *Deps, post *reddit.Post) *ThreadIndex {
-	t := &ThreadIndex{d: d, post: post, sort: reddit.Best, peek: d.Config.Display.PeekPane}
+	t := &ThreadIndex{d: d, post: post, sort: reddit.Best, reqSort: reddit.Best, peek: d.Config.Display.PeekPane, cap: 10}
 	t.table.SetHeight(minTableRows)
 	return t
 }
@@ -8945,11 +9501,15 @@ func (t *ThreadIndex) Init() ui.Action { return t.fetch(false) }
 func (t *ThreadIndex) Title() string   { return "Thread Index" }
 
 func (t *ThreadIndex) Info() string {
-	return fmt.Sprintf("r/%s · %s · %d msgs", t.post.Subreddit, strings.ToUpper(string(t.sort)), t.post.NumComments)
+	return fmt.Sprintf("r/%s · %s · %d msgs", t.post.Subreddit, strings.ToUpper(string(t.reqSort)), t.post.NumComments)
 }
 
 func (t *ThreadIndex) Keys() []ui.KeyHelp {
-	return []ui.KeyHelp{{"#/⏎", "Read"}, {"B", "ody"}, {"-/+", "Fold"}, {"Tab", "Peek"}, {"S", "ort"}, {"O", "pen link"}, {"R", "efresh"}, {"Q", "uit"}}
+	keys := []ui.KeyHelp{{"#/⏎", "Read"}, {"B", "ody"}, {"-/+", "Fold"}, {"Tab", "Peek"}, {"S", "ort"}}
+	if t.authFailed {
+		keys = append(keys, ui.KeyHelp{Key: "L", Desc: "og in"})
+	}
+	return append(keys, ui.KeyHelp{Key: "O", Desc: "pen link"}, ui.KeyHelp{Key: "R", Desc: "efresh"}, ui.KeyHelp{Key: "Q", Desc: "uit"})
 }
 
 func (t *ThreadIndex) Prompt() widgets.Prompt {
@@ -8961,10 +9521,10 @@ func (t *ThreadIndex) fetch(fresh bool) ui.Action {
 	gen := t.gen
 	t.loading = true
 	t.status, t.statusErr = "Retrieving...", false
-	store, sub, id, sort := t.d.Store, t.post.Subreddit, t.post.ID, t.sort
+	store, sub, id, sort := t.d.Store, t.post.Subreddit, t.post.ID, t.reqSort
 	return ui.Run{Fn: func(ctx context.Context) ui.Msg {
 		th, err := store.Thread(ctx, sub, id, sort, reddit.Fetch{Fresh: fresh})
-		return threadMsg{gen: gen, th: th, err: err}
+		return threadMsg{gen: gen, sort: sort, th: th, err: err}
 	}}
 }
 
@@ -8986,19 +9546,31 @@ func (t *ThreadIndex) syncSelected() {
 	}
 }
 
+func (t *ThreadIndex) fail(err error) {
+	t.loading = false
+	t.reqSort = t.sort
+	t.authFailed = isAuthError(err)
+	t.status, t.statusErr = errText(err), true
+}
+
 func (t *ThreadIndex) Update(msg ui.Msg) ui.Action {
 	switch m := msg.(type) {
 	case threadMsg:
 		if m.gen != t.gen {
 			return nil
 		}
-		t.loading = false
 		if m.err != nil {
-			t.status, t.statusErr = errText(m.err), true
+			t.fail(m.err)
 			return nil
 		}
+		t.loading = false
+		t.authFailed = false
+		t.sort = m.sort
+		if m.th.Post != nil {
+			t.post = m.th.Post
+		}
 		if t.model == nil {
-			t.model = threadmodel.New(m.th, 10)
+			t.model = threadmodel.New(m.th, t.cap)
 		} else {
 			t.model.Replace(m.th)
 		}
@@ -9008,11 +9580,11 @@ func (t *ThreadIndex) Update(msg ui.Msg) ui.Action {
 		if m.gen != t.gen {
 			return nil
 		}
-		t.loading = false
 		if m.err != nil {
-			t.status, t.statusErr = errText(m.err), true
+			t.fail(m.err)
 			return nil
 		}
+		t.loading = false
 		t.model.Attach(m.stub, m.things)
 		t.status = ""
 		t.refresh()
@@ -9020,21 +9592,31 @@ func (t *ThreadIndex) Update(msg ui.Msg) ui.Action {
 		if m.gen != t.gen {
 			return nil
 		}
-		t.loading = false
 		if m.err != nil {
-			t.status, t.statusErr = errText(m.err), true
+			t.fail(m.err)
 			return nil
 		}
+		t.loading = false
 		if !t.model.ReplaceSubtree(m.id, m.th) {
 			t.status, t.statusErr = "Could not load that part of the thread", true
 		} else {
 			t.status = ""
 		}
 		t.refresh()
+	case ui.ErrMsg:
+		t.fail(m.Err)
+	case linkExit:
+		if m.Err != nil {
+			t.status, t.statusErr = "Browser exited with an error. URL: "+m.URL, true
+		}
 	case ui.PopResult:
 		if sc, ok := m.Result.(SelectComment); ok && sc.ID != "" && t.model != nil {
 			t.selectedID = sc.ID
 			t.refresh()
+		}
+		if t.authFailed && t.d.Config.HasCredentials() {
+			t.authFailed = false
+			return t.fetch(true)
 		}
 	case ui.RateLimited:
 		t.status, t.statusErr = fmt.Sprintf("Rate limited, retrying in %ds", int(m.Wait.Seconds())), false
@@ -9051,7 +9633,11 @@ func (t *ThreadIndex) Draw(c term.Canvas) {
 	if t.model == nil {
 		return
 	}
-	t.model.SetMaxDepth(w / 8)
+	if cap := w / 8; cap != t.cap {
+		t.cap = cap
+		t.model.SetMaxDepth(cap)
+		t.refresh()
+	}
 
 	// Row budget: header 2, preview, rule, table heading + rows, [rule, peek].
 	var preview []textfmt.Line
@@ -9184,8 +9770,7 @@ func (t *ThreadIndex) drawPeek(c term.Canvas, y, w, rows int) {
 	x := 2
 	x += c.Text(x, y, author, theme.Style(role), w-4)
 	c.Text(x, y, " · "+textfmt.Score(cm.Score)+" · "+textfmt.RelTime(cm.Created, t.d.now()), theme.Style(theme.Meta), w-2-x)
-	body := cm.Body
-	lines := textfmt.Render(body, w-4).Lines
+	lines := textfmt.Render(cm.Body, w-4).Lines
 	bodyRows := rows - 1
 	if max := len(lines) - bodyRows; t.peekTop > max {
 		t.peekTop = max
@@ -9199,6 +9784,9 @@ func (t *ThreadIndex) drawPeek(c term.Canvas, y, w, rows int) {
 }
 
 func (t *ThreadIndex) HandleKey(k term.Key) ui.Action {
+	if k.Paste {
+		return nil
+	}
 	if v, submitted, handled := t.num.HandleKey(k); handled {
 		if submitted {
 			return t.openRow(v - 1)
@@ -9229,10 +9817,14 @@ func (t *ThreadIndex) HandleKey(k term.Key) ui.Action {
 			return ui.Push{Screen: newReader(t.d, t.model, "")}
 		}
 	case Rune(k) == 'S':
-		t.sort = t.sort.Next()
+		t.reqSort = t.reqSort.Next()
 		return t.fetch(false)
+	case Rune(k) == 'L':
+		if t.authFailed {
+			return ui.Push{Screen: NewNestedSetup(t.d)}
+		}
 	case Rune(k) == 'O':
-		t.openLink()
+		return t.openLink()
 	case Rune(k) == 'R':
 		return t.fetch(true)
 	case Rune(k) == '-':
@@ -9294,17 +9886,18 @@ func (t *ThreadIndex) openRow(i int) ui.Action {
 	}}
 }
 
-func (t *ThreadIndex) openLink() {
+func (t *ThreadIndex) openLink() ui.Action {
 	u := t.post.URL
 	if t.post.IsSelf || u == "" {
 		u = "https://www.reddit.com" + t.post.Permalink
 	}
-	if err := t.d.Open(u, nil); err != nil {
+	act, err := t.d.openInBrowser(u)
+	if err != nil {
 		t.status, t.statusErr = "Could not open browser. URL: "+u, true
-		return
+		return nil
 	}
-	t.d.Session.LinksOpened++
 	t.status, t.statusErr = "Opened in browser", false
+	return act
 }
 ```
 
@@ -9452,7 +10045,7 @@ func TestReaderLinks(t *testing.T) {
 	d, _ := newDeps(t)
 	th := redditest.SampleThread()
 	th.Comments[0].Body = "see [one](https://one.example) and [two](https://two.example/x)"
-	th.Comments[1].Body = "just https://bare.example"
+	th.Comments[0].Children[0].Body = "just https://bare.example" // c2 is the next message after c1
 	m := threadmodel.New(th, 10)
 	var opened []string
 	d.Open = func(u string, _ func(error)) error { opened = append(opened, u); return nil }
@@ -9497,6 +10090,29 @@ func TestReaderPaging(t *testing.T) {
 	mustContain(t, sim, "line 1")
 }
 
+func TestReaderRepliesIncludeCollapsedAndReveal(t *testing.T) {
+	d, _ := newDeps(t)
+	m := threadmodel.New(redditest.SampleThread(), 10)
+	m.Toggle("c1")
+	app, sim := run(t, NewReader(d, m, "c1"))
+	press(app, term.R('r'))
+	mustContain(t, sim, "1. torvaldsfan")
+	press(app, term.R('1'), term.K(term.KeyEnter))
+	mustContain(t, sim, "Agreed.", "Msg 2 of 4")
+	if m.IsCollapsed("c1") {
+		t.Error("jumping to a hidden reply should reveal it")
+	}
+}
+
+func TestReaderNegativeScore(t *testing.T) {
+	d, _ := newDeps(t)
+	th := redditest.SampleThread()
+	th.Comments[0].Score = -7
+	_, sim := run(t, NewReader(d, threadmodel.New(th, 10), "c1"))
+	mustContain(t, sim, "(-7)")
+	mustNotContain(t, sim, "(+-7)")
+}
+
 func TestReaderIgnoresPostMoreStubForReplies(t *testing.T) {
 	d, _ := newDeps(t)
 	th := reddit.Thread{Post: redditest.SamplePost("z", "Empty"), More: &reddit.MoreStub{ParentFullname: "t3_z", Count: 3, IDs: []string{"a"}}}
@@ -9532,16 +10148,19 @@ import (
 )
 
 // Reader shows one message (the post as message 0, or a comment) full width.
+// The current message is tracked by comment ID so the shared model may change
+// underneath it; "" means the post.
 type Reader struct {
 	d     *Deps
 	model *threadmodel.Model
-	pos   int // 0 = post, n = nth visible comment
+	curID string
 
-	doc    textfmt.Doc
-	box    widgets.TextBox
-	docW   int
-	docPos int
-	bodyH  int
+	doc     textfmt.Doc
+	box     widgets.TextBox
+	docW    int
+	docBody string
+	docID   string
+	bodyH   int
 
 	replies   bool
 	replyList []*reddit.Comment
@@ -9553,16 +10172,7 @@ type Reader struct {
 
 // NewReader opens the reader on commentID, or on the post when it is empty.
 func NewReader(d *Deps, m *threadmodel.Model, commentID string) *Reader {
-	r := &Reader{d: d, model: m, docPos: -1}
-	if commentID != "" {
-		for i, c := range m.Comments() {
-			if c.ID == commentID {
-				r.pos = i + 1
-				break
-			}
-		}
-	}
-	return r
+	return &Reader{d: d, model: m, curID: commentID, docW: -1}
 }
 
 func (r *Reader) Init() ui.Action {
@@ -9571,10 +10181,15 @@ func (r *Reader) Init() ui.Action {
 }
 
 func (r *Reader) Title() string { return "Read Message" }
-func (r *Reader) Info() string  { return fmt.Sprintf("Msg %d of %d", r.pos, len(r.model.Comments())) }
+
+func (r *Reader) Info() string {
+	return fmt.Sprintf("Msg %d of %d", r.pos(), len(r.model.Comments()))
+}
+
 func (r *Reader) Keys() []ui.KeyHelp {
 	return []ui.KeyHelp{{"N", "ext"}, {"P", "rev"}, {"U", "p"}, {"R", "eplies"}, {"T", "hread"}, {"O", "pen link"}, {"Spc", "Page"}, {"Q", "uit"}}
 }
+
 func (r *Reader) CapturesKeys() bool { return r.replies || r.linkAsk }
 
 func (r *Reader) Prompt() widgets.Prompt {
@@ -9589,19 +10204,28 @@ func (r *Reader) Prompt() widgets.Prompt {
 
 func (r *Reader) Update(ui.Msg) ui.Action { return nil }
 
-// current returns the comment shown, or nil for message 0.
-func (r *Reader) current() *reddit.Comment {
-	if r.pos == 0 {
-		return nil
+// pos is the 1-based position of the current comment among the visible
+// comments, or 0 for the post. A comment that is no longer visible falls
+// back to the post.
+func (r *Reader) pos() int {
+	if r.curID == "" {
+		return 0
 	}
-	cs := r.model.Comments()
-	if r.pos-1 >= len(cs) {
-		r.pos = len(cs)
-		if r.pos == 0 {
-			return nil
+	for i, c := range r.model.Comments() {
+		if c.ID == r.curID {
+			return i + 1
 		}
 	}
-	return cs[r.pos-1]
+	r.curID = ""
+	return 0
+}
+
+// current returns the comment shown, or nil for message 0.
+func (r *Reader) current() *reddit.Comment {
+	if p := r.pos(); p > 0 {
+		return r.model.Comments()[p-1]
+	}
+	return nil
 }
 
 func (r *Reader) bodyText() string {
@@ -9616,21 +10240,33 @@ func (r *Reader) bodyText() string {
 	return cm.Body
 }
 
+// ensureDoc rebuilds the wrapped document when the width, message or body changed.
 func (r *Reader) ensureDoc(w int) {
-	if r.docW == w && r.docPos == r.pos {
+	body := r.bodyText()
+	if r.docW == w && r.docBody == body && r.docID == r.curID {
 		return
 	}
-	r.doc = textfmt.Render(r.bodyText(), w)
+	r.doc = textfmt.Render(body, w)
 	lines := append([]textfmt.Line(nil), r.doc.Lines...)
 	if len(r.doc.Links) > 0 {
 		lines = append(lines, textfmt.Line{}, textfmt.Line{{Text: "Links:", Kind: textfmt.Bold}})
 		for i, u := range r.doc.Links {
-			lines = append(lines, textfmt.Line{{Text: "[" + itoa(i+1) + "] " + u, Kind: textfmt.Link}})
+			for _, l := range textfmt.Wrap("["+itoa(i+1)+"] "+u, w) {
+				lines = append(lines, textfmt.Line{{Text: l, Kind: textfmt.Link}})
+			}
 		}
 	}
 	r.box.Lines = lines
 	r.box.Top = 0
-	r.docW, r.docPos = w, r.pos
+	r.docW, r.docBody, r.docID = w, body, r.curID
+}
+
+// signed formats a score with an explicit sign for non-negative values.
+func signed(n int) string {
+	if n >= 0 {
+		return "+" + textfmt.Score(n)
+	}
+	return textfmt.Score(n)
 }
 
 func (r *Reader) Draw(c term.Canvas) {
@@ -9651,7 +10287,7 @@ func (r *Reader) Draw(c term.Canvas) {
 	x := 2
 	x += c.Text(x, 1, "From: ", hd, w)
 	x += c.Text(x, 1, author, theme.Style(role), w)
-	c.Text(x, 1, " (+"+textfmt.Score(score)+")", theme.Style(theme.Meta), w-x)
+	c.Text(x, 1, " ("+signed(score)+")", theme.Style(theme.Meta), w-x)
 	date := "Date: " + created.Local().Format("02/01/06 15:04")
 	c.Text(w-2-textfmt.Width(date), 1, date, theme.Style(theme.Meta), w)
 
@@ -9659,7 +10295,7 @@ func (r *Reader) Draw(c term.Canvas) {
 	if cm != nil {
 		re := "  Re: original post"
 		if parent := r.model.Parent(cm); parent != nil {
-			re = "  Re: #" + itoa(r.model.IndexOf(parent.ID)+1) + " " + parent.Author
+			re = "  Re: #" + itoa(r.indexOf(parent.ID)) + " " + parent.Author
 		}
 		re += fmt.Sprintf(" · depth %d · %d loaded replies", cm.Depth, len(cm.Children))
 		c.Text(2, y, textfmt.Truncate(re, w-4), theme.Style(theme.Meta), w-4)
@@ -9678,6 +10314,16 @@ func (r *Reader) Draw(c term.Canvas) {
 	}
 }
 
+// indexOf is a comment's 1-based position among visible comments, 0 if hidden.
+func (r *Reader) indexOf(id string) int {
+	for i, c := range r.model.Comments() {
+		if c.ID == id {
+			return i + 1
+		}
+	}
+	return 0
+}
+
 func (r *Reader) drawReplies(c term.Canvas, y, w int) {
 	c.Text(2, y, "Replies to this message:", theme.Style(theme.Heading), w-4)
 	if len(r.replyList) == 0 {
@@ -9685,7 +10331,8 @@ func (r *Reader) drawReplies(c term.Canvas, y, w int) {
 		return
 	}
 	for i, cm := range r.replyList {
-		if y+2+i >= y+r.bodyH {
+		if 2+i >= r.bodyH {
+			c.Text(4, y+r.bodyH-1, "… and "+itoa(len(r.replyList)-i)+" more; type a number", theme.Style(theme.Meta), w-6)
 			break
 		}
 		author, role := authorAndRole(cm, r.model.Post())
@@ -9701,15 +10348,20 @@ func (r *Reader) drawReplies(c term.Canvas, y, w int) {
 }
 
 func (r *Reader) HandleKey(k term.Key) ui.Action {
+	if k.Paste {
+		return nil
+	}
 	if r.replies || r.linkAsk {
 		if v, submitted, handled := r.num.HandleKey(k); handled {
 			if submitted {
+				var act ui.Action
 				if r.replies {
 					r.jumpToReply(v)
 				} else {
-					r.openLink(v)
+					act = r.openLink(v)
 				}
 				r.replies, r.linkAsk = false, false
+				return act
 			}
 			return nil
 		}
@@ -9734,19 +10386,23 @@ func (r *Reader) HandleKey(k term.Key) ui.Action {
 		r.box.Scroll(len(r.box.Lines), r.bodyH)
 	}
 	cs := r.model.Comments()
+	pos := r.pos()
 	switch {
 	case k.Code == term.KeyRune && k.Rune == ' ':
 		r.box.Scroll(r.bodyH, r.bodyH)
 	case Rune(k) == 'N':
-		if r.pos < len(cs) {
-			r.setPos(r.pos + 1)
+		if pos < len(cs) {
+			r.setCur(cs[pos].ID)
 		} else {
 			r.status, r.statusErr = "No more messages", false
 		}
 	case Rune(k) == 'P':
-		if r.pos > 0 {
-			r.setPos(r.pos - 1)
-		} else {
+		switch {
+		case pos > 1:
+			r.setCur(cs[pos-2].ID)
+		case pos == 1:
+			r.setCur("")
+		default:
 			r.status, r.statusErr = "No more messages", false
 		}
 	case Rune(k) == 'U':
@@ -9755,19 +10411,13 @@ func (r *Reader) HandleKey(k term.Key) ui.Action {
 			r.status, r.statusErr = "Already at top", false
 			break
 		}
-		parent := r.model.Parent(cm)
-		if parent == nil {
-			r.setPos(0)
-			break
-		}
-		for i, c := range cs {
-			if c.ID == parent.ID {
-				r.setPos(i + 1)
-				break
-			}
+		if parent := r.model.Parent(cm); parent != nil {
+			r.setCur(parent.ID)
+		} else {
+			r.setCur("")
 		}
 	case Rune(k) == 'R':
-		r.replyList = r.visibleReplies()
+		r.replyList = r.loadedReplies()
 		r.replies = true
 		r.num.Digits = ""
 	case Rune(k) == 'O':
@@ -9775,7 +10425,7 @@ func (r *Reader) HandleKey(k term.Key) ui.Action {
 		case 0:
 			r.status, r.statusErr = "No links in this message", false
 		case 1:
-			r.openLink(1)
+			return r.openLink(1)
 		default:
 			r.linkAsk = true
 			r.num.Digits = ""
@@ -9789,36 +10439,25 @@ func (r *Reader) HandleKey(k term.Key) ui.Action {
 	return nil
 }
 
-func (r *Reader) setPos(p int) {
-	r.pos = p
+// setCur moves to a message, revealing it if a collapse hid it.
+func (r *Reader) setCur(id string) {
+	if id != "" {
+		r.model.Reveal(id)
+	}
+	r.curID = id
 	r.status = ""
 	r.d.Session.MessagesRead++
-	r.docPos = -1
 	if r.docW > 0 {
 		r.ensureDoc(r.docW) // rebuild now so O sees the new message's links before the next Draw
 	}
 }
 
-// visibleReplies lists the current message's direct replies that are visible
-// in the thread index (loaded and not hidden by a collapse).
-func (r *Reader) visibleReplies() []*reddit.Comment {
-	visible := map[string]bool{}
-	for _, c := range r.model.Comments() {
-		visible[c.ID] = true
-	}
-	var candidates []*reddit.Comment
+// loadedReplies lists every loaded direct reply of the current message.
+func (r *Reader) loadedReplies() []*reddit.Comment {
 	if cm := r.current(); cm != nil {
-		candidates = cm.Children
-	} else {
-		candidates = r.model.Thread().Comments
+		return cm.Children
 	}
-	var out []*reddit.Comment
-	for _, c := range candidates {
-		if visible[c.ID] {
-			out = append(out, c)
-		}
-	}
-	return out
+	return r.model.Thread().Comments
 }
 
 func (r *Reader) jumpToReply(n int) {
@@ -9826,27 +10465,22 @@ func (r *Reader) jumpToReply(n int) {
 		r.status, r.statusErr = "No such reply", true
 		return
 	}
-	target := r.replyList[n-1]
-	for i, c := range r.model.Comments() {
-		if c.ID == target.ID {
-			r.setPos(i + 1)
-			return
-		}
-	}
+	r.setCur(r.replyList[n-1].ID)
 }
 
-func (r *Reader) openLink(n int) {
+func (r *Reader) openLink(n int) ui.Action {
 	if n < 1 || n > len(r.doc.Links) {
 		r.status, r.statusErr = "No such link", true
-		return
+		return nil
 	}
 	u := r.doc.Links[n-1]
-	if err := r.d.Open(u, nil); err != nil {
+	act, err := r.d.openInBrowser(u)
+	if err != nil {
 		r.status, r.statusErr = "Could not open browser. URL: "+u, true
-		return
+		return nil
 	}
-	r.d.Session.LinksOpened++
 	r.status, r.statusErr = "Opened in browser", false
+	return act
 }
 ```
 
@@ -9872,89 +10506,18 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 ---
 
-### Task 22: main wiring, bad-response sink, smoke test and README
+### Task 22: main wiring, smoke tests, build targets and README
 
 **Files:**
-- Modify: `cmd/redditbbs/main.go`, `internal/reddit/client.go` (add `WithBadResponseSink`), `README.md`
-- Test: `cmd/redditbbs/main_test.go`, `internal/ui/screens/smoke_test.go`, add `TestBadResponseSink` to `internal/reddit/client_test.go`
+- Modify: `cmd/redditbbs/main.go`, `Makefile`, `README.md`
+- Create: `.golangci.yml`
+- Test: `cmd/redditbbs/main_test.go`, `internal/ui/screens/smoke_test.go`
 
 **Interfaces:**
-- Consumes: everything above.
-- Produces: `reddit.WithBadResponseSink(func([]byte)) Option`; `main.run(args []string, stdout, stderr io.Writer) int`.
+- Consumes: everything above, including `reddit.WithBadResponseSink` from Task 10.
+- Produces: `main.run(args []string, stdout, stderr io.Writer) int`.
 
-- [ ] **Step 1: Write the failing client sink test**
-
-Append to `internal/reddit/client_test.go`:
-
-```go
-func TestBadResponseSink(t *testing.T) {
-	srv := &apiServer{t: t}
-	srv.handler = func(w http.ResponseWriter, r *http.Request, n int) bool {
-		fmt.Fprint(w, `{"kind":"Listing","data":{"children":[{"kind":"t3","data":"not an object"}]}}`)
-		return true
-	}
-	hs := httptest.NewServer(srv)
-	defer hs.Close()
-	var got []byte
-	c := NewClient(Credentials{ClientID: "id", ClientSecret: "sec", UserAgent: "ua"},
-		WithBaseURL(hs.URL), WithTokenURL(hs.URL+"/api/v1/access_token"), WithBadResponseSink(func(b []byte) { got = b }))
-	if _, err := c.Posts(context.Background(), "linux", Hot, "", Fetch{}); err == nil {
-		t.Fatal("expected parse error")
-	}
-	if !strings.Contains(string(got), "not an object") {
-		t.Errorf("sink did not receive the body: %q", got)
-	}
-}
-```
-
-- [ ] **Step 2: Run to verify failure**
-
-Run: `go test ./internal/reddit/ -run BadResponseSink`
-Expected: FAIL, undefined: WithBadResponseSink.
-
-- [ ] **Step 3: Add the sink to client.go**
-
-Add a field and option:
-
-```go
-	sink   func([]byte) // receives bodies that failed to parse
-```
-
-```go
-// WithBadResponseSink receives the body of any 200 response that fails to parse.
-func WithBadResponseSink(f func([]byte)) Option { return func(c *Client) { c.sink = f } }
-```
-
-Add a helper and use it in the four Store methods wherever a parse error is returned:
-
-```go
-// parsed reports a parse failure to the sink and returns the error unchanged.
-func (c *Client) parsed(b []byte, err error) error {
-	if err != nil && c.sink != nil {
-		if len(b) > 64<<10 {
-			b = b[:64<<10]
-		}
-		c.sink(b)
-	}
-	return err
-}
-```
-
-For example in `Posts`:
-
-```go
-	l, err := ParseListing(bytes.NewReader(b))
-	return l, c.parsed(b, err)
-```
-
-Apply the same shape to `Thread`, `Subtree` and the per-batch parse in `MoreChildren`.
-
-- [ ] **Step 4: Run client tests**
-
-Run: `go test ./internal/reddit/`
-Expected: PASS.
-
-- [ ] **Step 5: Write the failing smoke test**
+- [ ] **Step 1: Write the failing smoke tests**
 
 `internal/ui/screens/smoke_test.go`:
 
@@ -10031,14 +10594,46 @@ func TestSmokeWalkthrough(t *testing.T) {
 		t.Error("goodbye should quit on a key")
 	}
 }
+
+// TestSmokeRunLoop drives the real App.Run loop with injected events.
+func TestSmokeRunLoop(t *testing.T) {
+	d, fs := newDeps(t)
+	fs.Listings["linux/hot/"] = redditest.SampleListing(1, "")
+	sim := term.NewSim(80, 24)
+	app := ui.New(sim, NewSplash(d))
+	done := make(chan error, 1)
+	go func() { done <- app.Run() }()
+	for _, k := range []term.Key{term.R(' '), term.R('m'), term.K(term.KeyEnter)} {
+		sim.Inject(k)
+	}
+	deadline := time.After(3 * time.Second)
+	for !strings.Contains(sim.String(), "Post 1") {
+		select {
+		case <-deadline:
+			t.Fatalf("post list never rendered:\n%s", sim.String())
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+	sim.Inject(term.K(term.KeyCtrlC))
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("Run returned %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not exit on Ctrl-C")
+	}
+}
 ```
 
-- [ ] **Step 6: Run the smoke test**
+`smoke_test.go` imports `strings`, `testing`, `time`, `redditest`, `term` and `ui`. Reading `sim.String()` while `Run` draws from another goroutine is a benign race for this assertion loop; run this test without `-race` or guard `Sim` with a mutex if you enable the race detector project-wide.
+
+- [ ] **Step 2: Run the smoke tests**
 
 Run: `go test ./internal/ui/screens/ -run Smoke -v`
 Expected: PASS (all screens exist by now). If it fails, the failure is a real integration bug between screens: fix the screen, not the test.
 
-- [ ] **Step 7: Write the failing main test**
+- [ ] **Step 3: Write the failing main test**
 
 `cmd/redditbbs/main_test.go`:
 
@@ -10092,12 +10687,12 @@ func writeFile(path, content string) error { return os.WriteFile(path, []byte(co
 
 with `"os"` imported.
 
-- [ ] **Step 8: Run to verify failure**
+- [ ] **Step 4: Run to verify failure**
 
 Run: `go test ./cmd/redditbbs/`
 Expected: FAIL, undefined: run.
 
-- [ ] **Step 9: Implement main.go**
+- [ ] **Step 5: Implement main.go**
 
 ```go
 // Command redditbbs is a BBS-style terminal reader for Reddit.
@@ -10110,6 +10705,7 @@ import (
 	"os"
 	"path/filepath"
 	rdebug "runtime/debug"
+	"sync"
 	"time"
 
 	"github.com/markwatson/redditbbs/internal/browser"
@@ -10162,6 +10758,9 @@ func run(args []string, stdout, stderr io.Writer) (code int) {
 		fmt.Fprintln(stderr, "redditbbs: terminal:", err)
 		return 1
 	}
+	// One unconditional cleanup: Fini is idempotent, so every exit path
+	// (normal, error or panic) restores the terminal exactly once.
+	defer t.Fini()
 	defer func() {
 		if p := recover(); p != nil {
 			t.Fini()
@@ -10203,8 +10802,13 @@ func run(args []string, stdout, stderr io.Writer) (code int) {
 	return 0
 }
 
-// saveBadResponse writes body to $XDG_STATE_HOME/redditbbs/last-error.json.
+var badResponseMu sync.Mutex
+
+// saveBadResponse atomically writes body to
+// $XDG_STATE_HOME/redditbbs/last-error.json with mode 0600.
 func saveBadResponse(body []byte) {
+	badResponseMu.Lock()
+	defer badResponseMu.Unlock()
 	dir := os.Getenv("XDG_STATE_HOME")
 	if dir == "" {
 		home, err := os.UserHomeDir()
@@ -10217,16 +10821,87 @@ func saveBadResponse(body []byte) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return
 	}
-	_ = os.WriteFile(filepath.Join(dir, "last-error.json"), body, 0o600)
+	tmp, err := os.CreateTemp(dir, ".last-error-*.tmp")
+	if err != nil {
+		return
+	}
+	name := tmp.Name()
+	if _, err := tmp.Write(body); err != nil {
+		tmp.Close()
+		os.Remove(name)
+		return
+	}
+	if err := tmp.Chmod(0o600); err != nil {
+		tmp.Close()
+		os.Remove(name)
+		return
+	}
+	tmp.Close()
+	if err := os.Rename(name, filepath.Join(dir, "last-error.json")); err != nil {
+		os.Remove(name)
+	}
 }
 ```
 
-- [ ] **Step 10: Run everything**
+- [ ] **Step 6: Build targets and lint config**
 
-Run: `make test vet && make build && ./bin/redditbbs --version`
-Expected: all packages PASS, vet clean, version printed.
+Replace `Makefile`:
 
-- [ ] **Step 11: Write the README**
+```make
+GO ?= $(HOME)/.local/go/bin/go
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+GOLANGCI ?= $(shell command -v golangci-lint 2>/dev/null)
+
+.PHONY: build test vet lint run clean
+
+# CGO_ENABLED=0 gives a static binary that runs on any Linux of the same architecture.
+build:
+	CGO_ENABLED=0 $(GO) build -trimpath -ldflags "-s -w -X main.Version=$(VERSION)" -o bin/redditbbs ./cmd/redditbbs
+
+test:
+	$(GO) test ./...
+
+vet:
+	$(GO) vet ./...
+
+lint: vet
+ifneq ($(GOLANGCI),)
+	$(GOLANGCI) run ./...
+else
+	@echo "golangci-lint not installed; ran go vet only"
+endif
+
+run: build
+	./bin/redditbbs
+
+clean:
+	rm -rf bin
+```
+
+Create `.golangci.yml`:
+
+```yaml
+version: "2"
+linters:
+  default: standard
+  enable:
+    - errcheck
+    - govet
+    - staticcheck
+    - unused
+    - ineffassign
+    - misspell
+linters-settings:
+  misspell:
+    locale: UK
+```
+
+- [ ] **Step 7: Run everything**
+
+Run: `make test lint && make build && ./bin/redditbbs --version && file bin/redditbbs`
+Expected: all packages PASS, lint clean (or the vet-only notice), version printed, `file` reports a statically linked executable.
+
+- [ ] **Step 8: Write the README**
 
 Replace `README.md`:
 
@@ -10239,7 +10914,7 @@ comment index with a peek pane, and a one-message reader. Read-only.
 
 ## Setup
 
-1. Build: `make build` (needs Go 1.27). The binary is `bin/redditbbs`.
+1. Build: `make build` (needs Go 1.27). The binary is `bin/redditbbs`, statically linked.
 2. Register a free Reddit "script" app at https://www.reddit.com/prefs/apps
    (type *script*, any redirect URI). Reddit may need to approve the app
    before API requests succeed.
@@ -10285,15 +10960,15 @@ subreddit = "linux"
 
 ## Development
 
-`make test` runs the tests, `make vet` runs `go vet`. The design spec is in
+`make test` runs the tests, `make lint` runs `go vet` and golangci-lint when installed, `make build` produces a static binary. The design spec is in
 `docs/superpowers/specs/` and the implementation plan in
 `docs/superpowers/plans/`.
 ```
 
-- [ ] **Step 12: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
-git add cmd internal/reddit README.md internal/ui/screens/smoke_test.go
+git add cmd Makefile .golangci.yml README.md internal/ui/screens/smoke_test.go
 git commit -m "Wire up the binary, add smoke test and README
 
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
@@ -10304,5 +10979,6 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ## Self-review notes
 
 - Every spec section maps to a task: purpose and decisions (header), architecture and Canvas (Task 4), App loop (Task 14), Store (Tasks 6 and 10), screens (Tasks 15 to 21), text formatting (Task 3), configuration (Task 11), data layer (Tasks 6 to 10), error handling (spread across Tasks 10, 14 and the screens via `errText`), testing (each task), repository layout (Task 1 and Task 22).
-- Deferred constructors (`newPostList`, `newThreadIndex`, `newReader`, the temporary `NewSetup`) exist only so each task compiles and tests alone; each later task replaces its indirection and the smoke test in Task 22 proves the real chain.
+- Deferred constructors (`newPostList`, `newThreadIndex`, `newReader`, the temporary `NewSetup`) return a `placeholder` screen so each task compiles and its tests can assert navigation left the screen; each later task replaces its indirection and the smoke tests in Task 22 prove the real chain.
+- Declined from the Codex review, deliberately: golden-file screenshots (assertion tests on the simulated screen cover the same ground and do not rot), HTTP-date `Retry-After` (Reddit sends seconds), a live rate-limit countdown (the status shows the wait once), and a horizontal viewport for the join field (subreddit names are at most 21 characters).
 - The rate-limit countdown is delivered by `App.Post` from the client's wait callback, which runs on a worker goroutine; `Post` must never be called from the loop goroutine.

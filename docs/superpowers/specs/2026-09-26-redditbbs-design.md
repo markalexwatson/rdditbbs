@@ -1,7 +1,7 @@
 # RedditBBS design
 
 Date: 26/09/2026
-Status: revision 3 after two Codex review rounds
+Status: revision 4, reconciled with the implementation plan
 
 ## 1. Purpose
 
@@ -185,13 +185,18 @@ type Store interface {
     Posts(ctx context.Context, subreddit string, sort Sort, after string, f Fetch) (Listing, error)
     Thread(ctx context.Context, subreddit, postID string, sort CommentSort, f Fetch) (Thread, error)
     Subtree(ctx context.Context, subreddit, postID, commentID string, sort CommentSort) (Thread, error)
-    MoreChildren(ctx context.Context, linkFullname string, ids []string, sort CommentSort) ([]*Comment, error)
+    MoreChildren(ctx context.Context, linkFullname string, ids []string, sort CommentSort) (Things, error)
 }
+
+// Things is the flat morechildren result: comments plus any nested stubs,
+// attached into the tree by reddit.Attach.
+type Things struct{ Comments []*Comment; Stubs []*MoreStub }
 ```
 
-`reddit.Client` implements it. Tests supply a fake. Values returned are
-immutable snapshots; the UI keeps its own collapse and selection state and
-never mutates a returned tree.
+`reddit.Client` implements it. Tests supply a fake. The client parses a
+fresh value from cached bytes on every call, and the thread model
+deep-copies what it receives, so no screen ever mutates a value another
+holder can see.
 
 ## 4. Screens
 
@@ -375,7 +380,9 @@ or any key it returns `Quit`.
 ## 5. Text formatting
 
 `textfmt` turns a Reddit Markdown body into `[]Line`, each a slice of
-`Span{Text string; Role theme.Role}`, already wrapped to a given width.
+`Span{Text string; Kind Kind}` (Text, Quote, Code, Bold, Link), already
+wrapped to a given width; `widgets` maps each Kind to a theme role so
+`textfmt` stays free of theme knowledge.
 Supported subset:
 
 - Paragraphs separated by blank lines. Single newlines inside a paragraph
@@ -514,7 +521,7 @@ an entry. Cached values are never mutated after insertion.
 | Situation | Behaviour |
 | --- | --- |
 | Network error or 5xx | Status line shows a short error in red. Existing content stays. `R` retries |
-| 401 | Refresh token once and retry; if still 401, status "Credentials rejected" with a key to open New User Setup |
+| 401 | Refresh token once and retry; if still 401, status "Credentials rejected. Press L to log in again"; `L` pushes New User Setup in nested mode, which pops back on success and the screen refetches |
 | 403 | Status "Access denied" plus Reddit's `reason` field when present (private, quarantined, gated). Screen stays |
 | 404 | Status "No such area" on Post List; the screen stays so `J` can try again |
 | 429 | Wait per section 7.3, retry once, then show the error |
@@ -551,14 +558,17 @@ before its implementation.
   covering action ordering, Run binding and cancellation on pop, stale
   generation dropping, PopResult delivery, overlay drawing, key
   precedence and the undersized-terminal override.
-- `widgets` and `screens`: golden tests at 80x24 render each screen with
-  a fake Store and compare a text dump and a style dump against files in
-  `testdata`. Key tests drive `HandleKey` and assert on the Action and on
-  selection. Layout tests check the row arithmetic at 80x24 and 120x40.
-- Smoke test: an in-process test constructs App with a `SimCanvas`, a fake
-  Store and a fake clock, feeds a key script through Splash, Main Menu,
-  Area List, Post List, Thread Index, Message Reader and Goodbye, and
-  asserts on the final canvas and on the returned exit.
+- `widgets` and `screens`: screen tests render each screen at 80x24 into
+  the simulated terminal with a fake Store and assert on text and on the
+  style of specific cells (no golden files, which rot). Key tests drive
+  the App with key sequences and assert on the Action, on navigation and
+  on selection. Resize tests check the row arithmetic after shrinking.
+- Smoke tests: an in-process test constructs App with the simulated
+  terminal, a fake Store and a fixed clock, feeds a key script through
+  Splash, Main Menu, Area List, Post List, Thread Index, Message Reader
+  and Goodbye, and asserts on the canvas at each step; a second test runs
+  the real `App.Run` loop with injected events and checks it exits on
+  Ctrl-C.
 
 ## 10. Repository layout
 
