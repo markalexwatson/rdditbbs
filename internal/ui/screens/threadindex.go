@@ -15,7 +15,7 @@ import (
 )
 
 // newReader is indirected so this task compiles before Message Reader exists.
-var newReader = func(d *Deps, m *threadmodel.Model, commentID string) ui.Screen { return &placeholder{name: "reader"} }
+var newReader = func(d *Deps, m *threadmodel.Model, commentID string) ui.Screen { return NewReader(d, m, commentID) }
 
 const (
 	minTableRows = 5
