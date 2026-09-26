@@ -52,7 +52,7 @@ restricted.
 
 ## 3. Architecture
 
-One Go module, `github.com/markwatson/redditbbs`, with a single binary at
+One Go module, `github.com/markalexwatson/redditbbs`, with a single binary at
 `cmd/redditbbs`. Internal packages, each with one job:
 
 | Package | Responsibility | Depends on |

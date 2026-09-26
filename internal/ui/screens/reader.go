@@ -3,13 +3,13 @@ package screens
 import (
 	"fmt"
 
-	"github.com/markwatson/redditbbs/internal/reddit"
-	"github.com/markwatson/redditbbs/internal/term"
-	"github.com/markwatson/redditbbs/internal/textfmt"
-	"github.com/markwatson/redditbbs/internal/theme"
-	"github.com/markwatson/redditbbs/internal/ui"
-	"github.com/markwatson/redditbbs/internal/ui/threadmodel"
-	"github.com/markwatson/redditbbs/internal/ui/widgets"
+	"github.com/markalexwatson/redditbbs/internal/reddit"
+	"github.com/markalexwatson/redditbbs/internal/term"
+	"github.com/markalexwatson/redditbbs/internal/textfmt"
+	"github.com/markalexwatson/redditbbs/internal/theme"
+	"github.com/markalexwatson/redditbbs/internal/ui"
+	"github.com/markalexwatson/redditbbs/internal/ui/threadmodel"
+	"github.com/markalexwatson/redditbbs/internal/ui/widgets"
 )
 
 // Reader shows one message (the post as message 0, or a comment) full width.

@@ -1,10 +1,10 @@
 package ui
 
 import (
-	"github.com/markwatson/redditbbs/internal/term"
-	"github.com/markwatson/redditbbs/internal/textfmt"
-	"github.com/markwatson/redditbbs/internal/theme"
-	"github.com/markwatson/redditbbs/internal/ui/widgets"
+	"github.com/markalexwatson/redditbbs/internal/term"
+	"github.com/markalexwatson/redditbbs/internal/textfmt"
+	"github.com/markalexwatson/redditbbs/internal/theme"
+	"github.com/markalexwatson/redditbbs/internal/ui/widgets"
 )
 
 // helpScreen is the overlay listing the keys of the screen beneath it.

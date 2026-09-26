@@ -9,11 +9,11 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/markwatson/redditbbs/internal/config"
-	"github.com/markwatson/redditbbs/internal/reddit"
-	"github.com/markwatson/redditbbs/internal/session"
-	"github.com/markwatson/redditbbs/internal/term"
-	"github.com/markwatson/redditbbs/internal/ui"
+	"github.com/markalexwatson/redditbbs/internal/config"
+	"github.com/markalexwatson/redditbbs/internal/reddit"
+	"github.com/markalexwatson/redditbbs/internal/session"
+	"github.com/markalexwatson/redditbbs/internal/term"
+	"github.com/markalexwatson/redditbbs/internal/ui"
 )
 
 // Deps is everything screens need from the outside. Shared by pointer so

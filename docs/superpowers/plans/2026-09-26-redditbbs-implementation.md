@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - Go 1.27; `go.mod` declares `go 1.27`. Go lives at `~/.local/go/bin`; every command below assumes `export PATH=$HOME/.local/go/bin:$PATH`.
-- Module path `github.com/markwatson/redditbbs`. Single binary `cmd/redditbbs`.
+- Module path `github.com/markalexwatson/redditbbs`. Single binary `cmd/redditbbs`.
 - Only `internal/term` imports tcell. Only `internal/theme` names colours. Dependencies point downward per the spec table, with one addition recorded in Task 14: `internal/ui` may import `internal/ui/widgets`.
 - Minimum terminal 80x24. Title bar rows 0 to 2, hotkey bar row `h-2`, prompt row `h-1`, content rows 3 to `h-3` (`h-5` rows).
 - Colour scheme A: cyan frames, yellow headings, bright white subjects, green authors, grey chrome, reverse-video cursor row.
@@ -77,14 +77,14 @@
 - Create: `go.mod`, `cmd/redditbbs/main.go`, `Makefile`, `README.md`
 
 **Interfaces:**
-- Produces: module path `github.com/markwatson/redditbbs`; `make test` runs `go test ./...`.
+- Produces: module path `github.com/markalexwatson/redditbbs`; `make test` runs `go test ./...`.
 
 - [ ] **Step 1: Create go.mod and fetch dependencies**
 
 ```bash
 export PATH=$HOME/.local/go/bin:$PATH
 cd /home/markwatson/Projects/RedditBBS
-go mod init github.com/markwatson/redditbbs
+go mod init github.com/markalexwatson/redditbbs
 go get github.com/gdamore/tcell/v2@latest github.com/rivo/uniseg@latest github.com/BurntSushi/toml@latest
 ```
 
@@ -1970,7 +1970,7 @@ package theme
 import (
 	"testing"
 
-	"github.com/markwatson/redditbbs/internal/term"
+	"github.com/markalexwatson/redditbbs/internal/term"
 )
 
 func TestSchemeA(t *testing.T) {
@@ -2012,7 +2012,7 @@ Expected: FAIL, undefined: Role, Style, styles.
 // green authors, grey chrome, black-on-white cursor row.
 package theme
 
-import "github.com/markwatson/redditbbs/internal/term"
+import "github.com/markalexwatson/redditbbs/internal/term"
 
 // Role is a semantic use of colour.
 type Role int
@@ -4873,8 +4873,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/markwatson/redditbbs/internal/term"
-	"github.com/markwatson/redditbbs/internal/theme"
+	"github.com/markalexwatson/redditbbs/internal/term"
+	"github.com/markalexwatson/redditbbs/internal/theme"
 )
 
 func TestTitleBar(t *testing.T) {
@@ -4945,7 +4945,7 @@ package widgets
 import (
 	"testing"
 
-	"github.com/markwatson/redditbbs/internal/term"
+	"github.com/markalexwatson/redditbbs/internal/term"
 )
 
 func TestTableMovementAndScrolling(t *testing.T) {
@@ -5018,7 +5018,7 @@ package widgets
 import (
 	"testing"
 
-	"github.com/markwatson/redditbbs/internal/term"
+	"github.com/markalexwatson/redditbbs/internal/term"
 )
 
 func TestNumInput(t *testing.T) {
@@ -5101,9 +5101,9 @@ package widgets
 import (
 	"testing"
 
-	"github.com/markwatson/redditbbs/internal/term"
-	"github.com/markwatson/redditbbs/internal/textfmt"
-	"github.com/markwatson/redditbbs/internal/theme"
+	"github.com/markalexwatson/redditbbs/internal/term"
+	"github.com/markalexwatson/redditbbs/internal/textfmt"
+	"github.com/markalexwatson/redditbbs/internal/theme"
 )
 
 func TestTextBoxDrawAndScroll(t *testing.T) {
@@ -5183,9 +5183,9 @@ Expected: FAIL, undefined symbols.
 package widgets
 
 import (
-	"github.com/markwatson/redditbbs/internal/term"
-	"github.com/markwatson/redditbbs/internal/textfmt"
-	"github.com/markwatson/redditbbs/internal/theme"
+	"github.com/markalexwatson/redditbbs/internal/term"
+	"github.com/markalexwatson/redditbbs/internal/textfmt"
+	"github.com/markalexwatson/redditbbs/internal/theme"
 )
 
 // Chrome heights.
@@ -5308,7 +5308,7 @@ func Centre(c term.Canvas, y int, s string, st term.Style) {
 ```go
 package widgets
 
-import "github.com/markwatson/redditbbs/internal/term"
+import "github.com/markalexwatson/redditbbs/internal/term"
 
 // Table tracks a cursor over count rows shown height at a time, keeping the
 // cursor visible.
@@ -5405,8 +5405,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/markwatson/redditbbs/internal/term"
-	"github.com/markwatson/redditbbs/internal/textfmt"
+	"github.com/markalexwatson/redditbbs/internal/term"
+	"github.com/markalexwatson/redditbbs/internal/textfmt"
 )
 
 // NumInput collects typed digits for selecting a row by number.
@@ -5528,9 +5528,9 @@ func (t *TextInput) Draw(c term.Canvas, x, y, w int, st term.Style, focused bool
 package widgets
 
 import (
-	"github.com/markwatson/redditbbs/internal/term"
-	"github.com/markwatson/redditbbs/internal/textfmt"
-	"github.com/markwatson/redditbbs/internal/theme"
+	"github.com/markalexwatson/redditbbs/internal/term"
+	"github.com/markalexwatson/redditbbs/internal/textfmt"
+	"github.com/markalexwatson/redditbbs/internal/theme"
 )
 
 // TextBox shows pre-wrapped lines from a scroll offset.
@@ -5683,8 +5683,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/markwatson/redditbbs/internal/term"
-	"github.com/markwatson/redditbbs/internal/ui/widgets"
+	"github.com/markalexwatson/redditbbs/internal/term"
+	"github.com/markalexwatson/redditbbs/internal/ui/widgets"
 )
 
 // stub is a configurable test screen.
@@ -6046,8 +6046,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/markwatson/redditbbs/internal/term"
-	"github.com/markwatson/redditbbs/internal/ui/widgets"
+	"github.com/markalexwatson/redditbbs/internal/term"
+	"github.com/markalexwatson/redditbbs/internal/ui/widgets"
 )
 
 // Msg is anything delivered to a screen's Update.
@@ -6154,9 +6154,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/markwatson/redditbbs/internal/term"
-	"github.com/markwatson/redditbbs/internal/theme"
-	"github.com/markwatson/redditbbs/internal/ui/widgets"
+	"github.com/markalexwatson/redditbbs/internal/term"
+	"github.com/markalexwatson/redditbbs/internal/theme"
+	"github.com/markalexwatson/redditbbs/internal/ui/widgets"
 )
 
 type entry struct {
@@ -6479,10 +6479,10 @@ func (a *App) drawScreen(s Screen) {
 package ui
 
 import (
-	"github.com/markwatson/redditbbs/internal/term"
-	"github.com/markwatson/redditbbs/internal/textfmt"
-	"github.com/markwatson/redditbbs/internal/theme"
-	"github.com/markwatson/redditbbs/internal/ui/widgets"
+	"github.com/markalexwatson/redditbbs/internal/term"
+	"github.com/markalexwatson/redditbbs/internal/textfmt"
+	"github.com/markalexwatson/redditbbs/internal/theme"
+	"github.com/markalexwatson/redditbbs/internal/ui/widgets"
 )
 
 // helpScreen is the overlay listing the keys of the screen beneath it.
@@ -6599,7 +6599,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/markwatson/redditbbs/internal/reddit"
+	"github.com/markalexwatson/redditbbs/internal/reddit"
 )
 
 // FakeStore serves canned data. Keys: Listings "sub/sort/after", Threads by
@@ -6745,11 +6745,11 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/markwatson/redditbbs/internal/config"
-	"github.com/markwatson/redditbbs/internal/reddit"
-	"github.com/markwatson/redditbbs/internal/session"
-	"github.com/markwatson/redditbbs/internal/term"
-	"github.com/markwatson/redditbbs/internal/ui"
+	"github.com/markalexwatson/redditbbs/internal/config"
+	"github.com/markalexwatson/redditbbs/internal/reddit"
+	"github.com/markalexwatson/redditbbs/internal/session"
+	"github.com/markalexwatson/redditbbs/internal/term"
+	"github.com/markalexwatson/redditbbs/internal/ui"
 )
 
 // Deps is everything screens need from the outside. Shared by pointer so
@@ -6902,11 +6902,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/markwatson/redditbbs/internal/config"
-	"github.com/markwatson/redditbbs/internal/reddit/redditest"
-	"github.com/markwatson/redditbbs/internal/session"
-	"github.com/markwatson/redditbbs/internal/term"
-	"github.com/markwatson/redditbbs/internal/ui"
+	"github.com/markalexwatson/redditbbs/internal/config"
+	"github.com/markalexwatson/redditbbs/internal/reddit/redditest"
+	"github.com/markalexwatson/redditbbs/internal/session"
+	"github.com/markalexwatson/redditbbs/internal/term"
+	"github.com/markalexwatson/redditbbs/internal/ui"
 )
 
 var testNow = time.Date(2026, 9, 26, 20, 30, 0, 0, time.UTC)
@@ -6993,8 +6993,8 @@ package screens
 import (
 	"testing"
 
-	"github.com/markwatson/redditbbs/internal/term"
-	"github.com/markwatson/redditbbs/internal/ui"
+	"github.com/markalexwatson/redditbbs/internal/term"
+	"github.com/markalexwatson/redditbbs/internal/ui"
 )
 
 func TestGoodbyeShowsStatsAndQuitsOnKey(t *testing.T) {
@@ -7037,10 +7037,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/markwatson/redditbbs/internal/term"
-	"github.com/markwatson/redditbbs/internal/theme"
-	"github.com/markwatson/redditbbs/internal/ui"
-	"github.com/markwatson/redditbbs/internal/ui/widgets"
+	"github.com/markalexwatson/redditbbs/internal/term"
+	"github.com/markalexwatson/redditbbs/internal/theme"
+	"github.com/markalexwatson/redditbbs/internal/ui"
+	"github.com/markalexwatson/redditbbs/internal/ui/widgets"
 )
 
 const goodbyeTick = 1
@@ -7140,7 +7140,7 @@ package screens
 import (
 	"testing"
 
-	"github.com/markwatson/redditbbs/internal/term"
+	"github.com/markalexwatson/redditbbs/internal/term"
 )
 
 func TestSplashShowsLogoAndGoesToMenu(t *testing.T) {
@@ -7162,7 +7162,7 @@ package screens
 import (
 	"testing"
 
-	"github.com/markwatson/redditbbs/internal/term"
+	"github.com/markalexwatson/redditbbs/internal/term"
 )
 
 func TestMainMenuLists(t *testing.T) {
@@ -7234,8 +7234,8 @@ package screens
 import (
 	"testing"
 
-	"github.com/markwatson/redditbbs/internal/term"
-	"github.com/markwatson/redditbbs/internal/theme"
+	"github.com/markalexwatson/redditbbs/internal/term"
+	"github.com/markalexwatson/redditbbs/internal/theme"
 )
 
 func TestAreaListRowsAndCursor(t *testing.T) {
@@ -7304,10 +7304,10 @@ Expected: FAIL, undefined: NewSplash, NewMainMenu, NewAreaList.
 package screens
 
 import (
-	"github.com/markwatson/redditbbs/internal/term"
-	"github.com/markwatson/redditbbs/internal/theme"
-	"github.com/markwatson/redditbbs/internal/ui"
-	"github.com/markwatson/redditbbs/internal/ui/widgets"
+	"github.com/markalexwatson/redditbbs/internal/term"
+	"github.com/markalexwatson/redditbbs/internal/theme"
+	"github.com/markalexwatson/redditbbs/internal/ui"
+	"github.com/markalexwatson/redditbbs/internal/ui/widgets"
 )
 
 var logoLines = []string{
@@ -7364,11 +7364,11 @@ func (s *Splash) HandleKey(term.Key) ui.Action {
 package screens
 
 import (
-	"github.com/markwatson/redditbbs/internal/config"
-	"github.com/markwatson/redditbbs/internal/term"
-	"github.com/markwatson/redditbbs/internal/theme"
-	"github.com/markwatson/redditbbs/internal/ui"
-	"github.com/markwatson/redditbbs/internal/ui/widgets"
+	"github.com/markalexwatson/redditbbs/internal/config"
+	"github.com/markalexwatson/redditbbs/internal/term"
+	"github.com/markalexwatson/redditbbs/internal/theme"
+	"github.com/markalexwatson/redditbbs/internal/ui"
+	"github.com/markalexwatson/redditbbs/internal/ui/widgets"
 )
 
 // newPostList is indirected so this task compiles before Post List exists.
@@ -7478,11 +7478,11 @@ func (m *MainMenu) HandleKey(k term.Key) ui.Action {
 package screens
 
 import (
-	"github.com/markwatson/redditbbs/internal/term"
-	"github.com/markwatson/redditbbs/internal/textfmt"
-	"github.com/markwatson/redditbbs/internal/theme"
-	"github.com/markwatson/redditbbs/internal/ui"
-	"github.com/markwatson/redditbbs/internal/ui/widgets"
+	"github.com/markalexwatson/redditbbs/internal/term"
+	"github.com/markalexwatson/redditbbs/internal/textfmt"
+	"github.com/markalexwatson/redditbbs/internal/theme"
+	"github.com/markalexwatson/redditbbs/internal/ui"
+	"github.com/markalexwatson/redditbbs/internal/ui/widgets"
 )
 
 // AreaList shows the configured subreddits.
@@ -7605,7 +7605,7 @@ If Task 17 has not been done yet, add to a temporary `internal/ui/screens/setup.
 ```go
 package screens
 
-import "github.com/markwatson/redditbbs/internal/ui"
+import "github.com/markalexwatson/redditbbs/internal/ui"
 
 // NewSetup is replaced by the real New User Setup screen in Task 17.
 func NewSetup(d *Deps) ui.Screen { return &placeholder{name: "setup"} }
@@ -7650,11 +7650,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/markwatson/redditbbs/internal/config"
-	"github.com/markwatson/redditbbs/internal/reddit"
-	"github.com/markwatson/redditbbs/internal/reddit/redditest"
-	"github.com/markwatson/redditbbs/internal/term"
-	"github.com/markwatson/redditbbs/internal/ui"
+	"github.com/markalexwatson/redditbbs/internal/config"
+	"github.com/markalexwatson/redditbbs/internal/reddit"
+	"github.com/markalexwatson/redditbbs/internal/reddit/redditest"
+	"github.com/markalexwatson/redditbbs/internal/term"
+	"github.com/markalexwatson/redditbbs/internal/ui"
 )
 
 func setupDeps(t *testing.T) (*Deps, *redditest.FakeStore) {
@@ -7820,12 +7820,12 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/markwatson/redditbbs/internal/config"
-	"github.com/markwatson/redditbbs/internal/reddit"
-	"github.com/markwatson/redditbbs/internal/term"
-	"github.com/markwatson/redditbbs/internal/theme"
-	"github.com/markwatson/redditbbs/internal/ui"
-	"github.com/markwatson/redditbbs/internal/ui/widgets"
+	"github.com/markalexwatson/redditbbs/internal/config"
+	"github.com/markalexwatson/redditbbs/internal/reddit"
+	"github.com/markalexwatson/redditbbs/internal/term"
+	"github.com/markalexwatson/redditbbs/internal/theme"
+	"github.com/markalexwatson/redditbbs/internal/ui"
+	"github.com/markalexwatson/redditbbs/internal/ui/widgets"
 )
 
 var errNoStoreFactory = errors.New("no store factory configured")
@@ -8047,12 +8047,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/markwatson/redditbbs/internal/config"
-	"github.com/markwatson/redditbbs/internal/reddit"
-	"github.com/markwatson/redditbbs/internal/reddit/redditest"
-	"github.com/markwatson/redditbbs/internal/term"
-	"github.com/markwatson/redditbbs/internal/theme"
-	"github.com/markwatson/redditbbs/internal/ui"
+	"github.com/markalexwatson/redditbbs/internal/config"
+	"github.com/markalexwatson/redditbbs/internal/reddit"
+	"github.com/markalexwatson/redditbbs/internal/reddit/redditest"
+	"github.com/markalexwatson/redditbbs/internal/term"
+	"github.com/markalexwatson/redditbbs/internal/theme"
+	"github.com/markalexwatson/redditbbs/internal/ui"
 )
 
 var linuxArea = config.Area{Name: "Linux", Subreddit: "linux"}
@@ -8338,13 +8338,13 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/markwatson/redditbbs/internal/config"
-	"github.com/markwatson/redditbbs/internal/reddit"
-	"github.com/markwatson/redditbbs/internal/term"
-	"github.com/markwatson/redditbbs/internal/textfmt"
-	"github.com/markwatson/redditbbs/internal/theme"
-	"github.com/markwatson/redditbbs/internal/ui"
-	"github.com/markwatson/redditbbs/internal/ui/widgets"
+	"github.com/markalexwatson/redditbbs/internal/config"
+	"github.com/markalexwatson/redditbbs/internal/reddit"
+	"github.com/markalexwatson/redditbbs/internal/term"
+	"github.com/markalexwatson/redditbbs/internal/textfmt"
+	"github.com/markalexwatson/redditbbs/internal/theme"
+	"github.com/markalexwatson/redditbbs/internal/ui"
+	"github.com/markalexwatson/redditbbs/internal/ui/widgets"
 )
 
 // newThreadIndex is indirected so this task compiles before Thread Index exists.
@@ -8854,8 +8854,8 @@ package threadmodel
 import (
 	"testing"
 
-	"github.com/markwatson/redditbbs/internal/reddit"
-	"github.com/markwatson/redditbbs/internal/reddit/redditest"
+	"github.com/markalexwatson/redditbbs/internal/reddit"
+	"github.com/markalexwatson/redditbbs/internal/reddit/redditest"
 )
 
 func ids(rows []Row) []string {
@@ -9073,8 +9073,8 @@ package threadmodel
 import (
 	"strings"
 
-	"github.com/markwatson/redditbbs/internal/reddit"
-	"github.com/markwatson/redditbbs/internal/ui/widgets"
+	"github.com/markalexwatson/redditbbs/internal/reddit"
+	"github.com/markalexwatson/redditbbs/internal/ui/widgets"
 )
 
 // Row is one line of the thread index: a comment or a stub.
@@ -9334,11 +9334,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/markwatson/redditbbs/internal/reddit"
-	"github.com/markwatson/redditbbs/internal/reddit/redditest"
-	"github.com/markwatson/redditbbs/internal/term"
-	"github.com/markwatson/redditbbs/internal/theme"
-	"github.com/markwatson/redditbbs/internal/ui"
+	"github.com/markalexwatson/redditbbs/internal/reddit"
+	"github.com/markalexwatson/redditbbs/internal/reddit/redditest"
+	"github.com/markalexwatson/redditbbs/internal/term"
+	"github.com/markalexwatson/redditbbs/internal/theme"
+	"github.com/markalexwatson/redditbbs/internal/ui"
 )
 
 func threadIndexUp(t *testing.T) (*ui.App, *term.Sim, *Deps, *redditest.FakeStore, *ThreadIndex) {
@@ -9534,13 +9534,13 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/markwatson/redditbbs/internal/reddit"
-	"github.com/markwatson/redditbbs/internal/term"
-	"github.com/markwatson/redditbbs/internal/textfmt"
-	"github.com/markwatson/redditbbs/internal/theme"
-	"github.com/markwatson/redditbbs/internal/ui"
-	"github.com/markwatson/redditbbs/internal/ui/threadmodel"
-	"github.com/markwatson/redditbbs/internal/ui/widgets"
+	"github.com/markalexwatson/redditbbs/internal/reddit"
+	"github.com/markalexwatson/redditbbs/internal/term"
+	"github.com/markalexwatson/redditbbs/internal/textfmt"
+	"github.com/markalexwatson/redditbbs/internal/theme"
+	"github.com/markalexwatson/redditbbs/internal/ui"
+	"github.com/markalexwatson/redditbbs/internal/ui/threadmodel"
+	"github.com/markalexwatson/redditbbs/internal/ui/widgets"
 )
 
 // newReader is indirected so this task compiles before Message Reader exists.
@@ -10054,11 +10054,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/markwatson/redditbbs/internal/reddit"
-	"github.com/markwatson/redditbbs/internal/reddit/redditest"
-	"github.com/markwatson/redditbbs/internal/term"
-	"github.com/markwatson/redditbbs/internal/ui"
-	"github.com/markwatson/redditbbs/internal/ui/threadmodel"
+	"github.com/markalexwatson/redditbbs/internal/reddit"
+	"github.com/markalexwatson/redditbbs/internal/reddit/redditest"
+	"github.com/markalexwatson/redditbbs/internal/term"
+	"github.com/markalexwatson/redditbbs/internal/ui"
+	"github.com/markalexwatson/redditbbs/internal/ui/threadmodel"
 )
 
 func readerAt(t *testing.T, id string) (*ui.App, *term.Sim, *Deps, *Reader) {
@@ -10247,13 +10247,13 @@ package screens
 import (
 	"fmt"
 
-	"github.com/markwatson/redditbbs/internal/reddit"
-	"github.com/markwatson/redditbbs/internal/term"
-	"github.com/markwatson/redditbbs/internal/textfmt"
-	"github.com/markwatson/redditbbs/internal/theme"
-	"github.com/markwatson/redditbbs/internal/ui"
-	"github.com/markwatson/redditbbs/internal/ui/threadmodel"
-	"github.com/markwatson/redditbbs/internal/ui/widgets"
+	"github.com/markalexwatson/redditbbs/internal/reddit"
+	"github.com/markalexwatson/redditbbs/internal/term"
+	"github.com/markalexwatson/redditbbs/internal/textfmt"
+	"github.com/markalexwatson/redditbbs/internal/theme"
+	"github.com/markalexwatson/redditbbs/internal/ui"
+	"github.com/markalexwatson/redditbbs/internal/ui/threadmodel"
+	"github.com/markalexwatson/redditbbs/internal/ui/widgets"
 )
 
 // Reader shows one message (the post as message 0, or a comment) full width.
@@ -10642,8 +10642,8 @@ package screens
 import (
 	"testing"
 
-	"github.com/markwatson/redditbbs/internal/reddit/redditest"
-	"github.com/markwatson/redditbbs/internal/term"
+	"github.com/markalexwatson/redditbbs/internal/reddit/redditest"
+	"github.com/markalexwatson/redditbbs/internal/term"
 )
 
 // TestSmokeWalkthrough drives every screen in order through the App loop.
@@ -10823,13 +10823,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/markwatson/redditbbs/internal/browser"
-	"github.com/markwatson/redditbbs/internal/config"
-	"github.com/markwatson/redditbbs/internal/reddit"
-	"github.com/markwatson/redditbbs/internal/session"
-	"github.com/markwatson/redditbbs/internal/term"
-	"github.com/markwatson/redditbbs/internal/ui"
-	"github.com/markwatson/redditbbs/internal/ui/screens"
+	"github.com/markalexwatson/redditbbs/internal/browser"
+	"github.com/markalexwatson/redditbbs/internal/config"
+	"github.com/markalexwatson/redditbbs/internal/reddit"
+	"github.com/markalexwatson/redditbbs/internal/session"
+	"github.com/markalexwatson/redditbbs/internal/term"
+	"github.com/markalexwatson/redditbbs/internal/ui"
+	"github.com/markalexwatson/redditbbs/internal/ui/screens"
 )
 
 // Version is set at build time via -ldflags "-X main.Version=…".

@@ -3,7 +3,7 @@
 // green authors, grey chrome, black-on-white cursor row.
 package theme
 
-import "github.com/markwatson/redditbbs/internal/term"
+import "github.com/markalexwatson/redditbbs/internal/term"
 
 // Role is a semantic use of colour.
 type Role int

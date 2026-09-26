@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/markwatson/redditbbs/internal/reddit"
+	"github.com/markalexwatson/redditbbs/internal/reddit"
 )
 
 // FakeStore serves canned data. Keys: Listings "sub/sort/after", Threads by

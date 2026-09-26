@@ -11,13 +11,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/markwatson/redditbbs/internal/browser"
-	"github.com/markwatson/redditbbs/internal/config"
-	"github.com/markwatson/redditbbs/internal/reddit"
-	"github.com/markwatson/redditbbs/internal/session"
-	"github.com/markwatson/redditbbs/internal/term"
-	"github.com/markwatson/redditbbs/internal/ui"
-	"github.com/markwatson/redditbbs/internal/ui/screens"
+	"github.com/markalexwatson/redditbbs/internal/browser"
+	"github.com/markalexwatson/redditbbs/internal/config"
+	"github.com/markalexwatson/redditbbs/internal/reddit"
+	"github.com/markalexwatson/redditbbs/internal/session"
+	"github.com/markalexwatson/redditbbs/internal/term"
+	"github.com/markalexwatson/redditbbs/internal/ui"
+	"github.com/markalexwatson/redditbbs/internal/ui/screens"
 )
 
 // Version is set at build time via -ldflags "-X main.Version=…".

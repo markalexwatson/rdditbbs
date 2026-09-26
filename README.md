@@ -7,9 +7,14 @@ comment index with a peek pane, and a one-message reader. Read-only.
 ## Setup
 
 1. Build: `make build` (needs Go 1.27). The binary is `bin/redditbbs`, statically linked.
-2. Register a free Reddit "script" app at https://www.reddit.com/prefs/apps
-   (type *script*, any redirect URI). Reddit may need to approve the app
-   before API requests succeed.
+2. Register for Reddit API access first: submit a Data Access Request at
+   https://support.reddithelp.com/hc/en-us/requests/new?ticket_form_id=14868593862164
+   (role "I'm a developer", building an app outside Devvit). Reddit will
+   refuse to create an app for an account that has not done this. Once
+   approved, register a free "script" app at https://old.reddit.com/prefs/apps
+   (type *script*, any redirect URI, and the name must not contain "reddit").
+   Every user of this program needs their own app and credentials; none are
+   shipped with it.
 3. Run `./bin/redditbbs`. The New User Setup screen asks for the client ID
    and secret, checks them against Reddit, and saves them to
    `~/.config/redditbbs/config.toml` with mode 0600.

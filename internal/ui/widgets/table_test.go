@@ -3,7 +3,7 @@ package widgets
 import (
 	"testing"
 
-	"github.com/markwatson/redditbbs/internal/term"
+	"github.com/markalexwatson/redditbbs/internal/term"
 )
 
 func TestTableMovementAndScrolling(t *testing.T) {

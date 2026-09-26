@@ -4,11 +4,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/markwatson/redditbbs/internal/reddit"
-	"github.com/markwatson/redditbbs/internal/reddit/redditest"
-	"github.com/markwatson/redditbbs/internal/term"
-	"github.com/markwatson/redditbbs/internal/theme"
-	"github.com/markwatson/redditbbs/internal/ui"
+	"github.com/markalexwatson/redditbbs/internal/reddit"
+	"github.com/markalexwatson/redditbbs/internal/reddit/redditest"
+	"github.com/markalexwatson/redditbbs/internal/term"
+	"github.com/markalexwatson/redditbbs/internal/theme"
+	"github.com/markalexwatson/redditbbs/internal/ui"
 )
 
 func threadIndexUp(t *testing.T) (*ui.App, *term.Sim, *Deps, *redditest.FakeStore, *ThreadIndex) {

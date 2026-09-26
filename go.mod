@@ -1,4 +1,4 @@
-module github.com/markwatson/redditbbs
+module github.com/markalexwatson/redditbbs
 
 go 1.27.1
 

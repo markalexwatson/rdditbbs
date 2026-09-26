@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/markwatson/redditbbs/internal/term"
-	"github.com/markwatson/redditbbs/internal/ui/widgets"
+	"github.com/markalexwatson/redditbbs/internal/term"
+	"github.com/markalexwatson/redditbbs/internal/ui/widgets"
 )
 
 // stub is a configurable test screen.

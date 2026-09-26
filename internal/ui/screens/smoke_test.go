@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/markwatson/redditbbs/internal/reddit/redditest"
-	"github.com/markwatson/redditbbs/internal/term"
-	"github.com/markwatson/redditbbs/internal/ui"
+	"github.com/markalexwatson/redditbbs/internal/reddit/redditest"
+	"github.com/markalexwatson/redditbbs/internal/term"
+	"github.com/markalexwatson/redditbbs/internal/ui"
 )
 
 // TestSmokeWalkthrough drives every screen in order through the App loop.

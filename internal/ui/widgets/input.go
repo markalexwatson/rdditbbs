@@ -4,8 +4,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/markwatson/redditbbs/internal/term"
-	"github.com/markwatson/redditbbs/internal/textfmt"
+	"github.com/markalexwatson/redditbbs/internal/term"
+	"github.com/markalexwatson/redditbbs/internal/textfmt"
 )
 
 // NumInput collects typed digits for selecting a row by number.

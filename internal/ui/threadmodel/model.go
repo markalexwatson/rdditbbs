@@ -6,8 +6,8 @@ package threadmodel
 import (
 	"strings"
 
-	"github.com/markwatson/redditbbs/internal/reddit"
-	"github.com/markwatson/redditbbs/internal/ui/widgets"
+	"github.com/markalexwatson/redditbbs/internal/reddit"
+	"github.com/markalexwatson/redditbbs/internal/ui/widgets"
 )
 
 // Row is one line of the thread index: a comment or a stub.

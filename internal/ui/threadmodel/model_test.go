@@ -3,8 +3,8 @@ package threadmodel
 import (
 	"testing"
 
-	"github.com/markwatson/redditbbs/internal/reddit"
-	"github.com/markwatson/redditbbs/internal/reddit/redditest"
+	"github.com/markalexwatson/redditbbs/internal/reddit"
+	"github.com/markalexwatson/redditbbs/internal/reddit/redditest"
 )
 
 func ids(rows []Row) []string {

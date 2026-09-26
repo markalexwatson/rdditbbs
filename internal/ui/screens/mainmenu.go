@@ -1,11 +1,11 @@
 package screens
 
 import (
-	"github.com/markwatson/redditbbs/internal/config"
-	"github.com/markwatson/redditbbs/internal/term"
-	"github.com/markwatson/redditbbs/internal/theme"
-	"github.com/markwatson/redditbbs/internal/ui"
-	"github.com/markwatson/redditbbs/internal/ui/widgets"
+	"github.com/markalexwatson/redditbbs/internal/config"
+	"github.com/markalexwatson/redditbbs/internal/term"
+	"github.com/markalexwatson/redditbbs/internal/theme"
+	"github.com/markalexwatson/redditbbs/internal/ui"
+	"github.com/markalexwatson/redditbbs/internal/ui/widgets"
 )
 
 // newPostList is indirected so this task compiles before Post List exists.

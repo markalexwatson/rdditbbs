@@ -3,7 +3,7 @@ package theme
 import (
 	"testing"
 
-	"github.com/markwatson/redditbbs/internal/term"
+	"github.com/markalexwatson/redditbbs/internal/term"
 )
 
 func TestSchemeA(t *testing.T) {

@@ -3,7 +3,7 @@ package screens
 import (
 	"testing"
 
-	"github.com/markwatson/redditbbs/internal/term"
+	"github.com/markalexwatson/redditbbs/internal/term"
 )
 
 func TestMainMenuLists(t *testing.T) {

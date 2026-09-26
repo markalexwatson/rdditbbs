@@ -3,8 +3,8 @@ package screens
 import (
 	"testing"
 
-	"github.com/markwatson/redditbbs/internal/term"
-	"github.com/markwatson/redditbbs/internal/ui"
+	"github.com/markalexwatson/redditbbs/internal/term"
+	"github.com/markalexwatson/redditbbs/internal/ui"
 )
 
 func TestGoodbyeShowsStatsAndQuitsOnKey(t *testing.T) {
