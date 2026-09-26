@@ -15,7 +15,7 @@ import (
 )
 
 // newThreadIndex is indirected so this task compiles before Thread Index exists.
-var newThreadIndex = func(d *Deps, p *reddit.Post) ui.Screen { return &placeholder{name: "thread index"} }
+var newThreadIndex = func(d *Deps, p *reddit.Post) ui.Screen { return NewThreadIndex(d, p) }
 
 // PostList shows one subreddit's posts, paginated to the screen height.
 type PostList struct {
