@@ -40,3 +40,7 @@ cursor, type a number and `Enter` to select a row, `Ctrl-L` redraw,
 
 ## Configuration
 
+
+## Licence
+
+MIT. See `LICENSE`.
