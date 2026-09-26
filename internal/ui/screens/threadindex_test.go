@@ -187,3 +187,12 @@ func TestThreadIndexOpenLinkAndQuit(t *testing.T) {
 		t.Error("Q on the only screen pops to quit")
 	}
 }
+
+func TestThreadIndexPartialMoreResultsAttached(t *testing.T) {
+	app, sim, _, fs, _ := threadIndexUp(t)
+	fs.More = reddit.Things{Comments: []*reddit.Comment{{ID: "x", Fullname: "t1_x", ParentFullname: "t1_c1", Author: "xorg4life", Body: "X11 forever"}}}
+	fs.MoreErr = &reddit.APIError{Status: 500}
+	press(app, term.R('3'), term.K(term.KeyEnter))
+	pump(t, app)
+	mustContain(t, sim, "xorg4life", "Reddit is having trouble", "[load 2 more replies]")
+}

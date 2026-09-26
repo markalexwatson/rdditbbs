@@ -78,23 +78,33 @@ func (g *RateGate) Acquire(ctx context.Context) error {
 }
 
 // Release records a response's headers and frees the reservation. Missing
-// headers count down an assumed allowance of 60 per minute.
+// headers count down an assumed allowance of 60 per minute. Responses can
+// arrive out of order, so within one reset window a higher remaining count
+// never replaces a lower one; only a new window accepts the count as given.
 func (g *RateGate) Release(h http.Header) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.inflight--
+	var newReset time.Time
+	if s := h.Get("X-Ratelimit-Reset"); s != "" {
+		if secs, err := strconv.Atoi(s); err == nil {
+			newReset = g.now().Add(time.Duration(secs) * time.Second)
+		}
+	}
+	newWindow := !newReset.IsZero() && newReset.After(g.reset.Add(2*time.Second))
 	if r := h.Get("X-Ratelimit-Remaining"); r != "" {
 		if f, err := strconv.ParseFloat(r, 64); err == nil {
-			g.remaining = f
+			if newWindow || f < g.remaining {
+				g.remaining = f
+			}
 		}
 	} else {
 		g.remaining--
 	}
-	if s := h.Get("X-Ratelimit-Reset"); s != "" {
-		if secs, err := strconv.Atoi(s); err == nil {
-			g.reset = g.now().Add(time.Duration(secs) * time.Second)
-		}
-	} else if g.reset.IsZero() {
+	switch {
+	case !newReset.IsZero():
+		g.reset = newReset
+	case g.reset.IsZero():
 		g.reset = g.now().Add(time.Minute)
 	}
 }
@@ -109,7 +119,8 @@ func (g *RateGate) Reset() {
 }
 
 // WaitFor returns how long a 429 response asks us to wait: Retry-After, else
-// the ratelimit reset, else one second.
+// the response's ratelimit reset, else the reset the gate already knows,
+// else one second.
 func (g *RateGate) WaitFor(h http.Header) time.Duration {
 	if ra := h.Get("Retry-After"); ra != "" {
 		if secs, err := strconv.Atoi(ra); err == nil && secs > 0 {
@@ -120,6 +131,11 @@ func (g *RateGate) WaitFor(h http.Header) time.Duration {
 		if secs, err := strconv.Atoi(s); err == nil && secs > 0 {
 			return time.Duration(secs) * time.Second
 		}
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if d := g.reset.Sub(g.now()); d > 0 {
+		return d
 	}
 	return time.Second
 }

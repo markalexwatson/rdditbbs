@@ -25,12 +25,13 @@ type PostList struct {
 	sort    reddit.Sort // committed: the sort the loaded posts have
 	reqSort reddit.Sort // requested: shown in the title while a sort change loads
 
-	posts  []*reddit.Post
-	seen   map[string]bool
-	after  string
-	ended  bool
-	cursor int
-	rows   int // data rows per page
+	posts   []*reddit.Post
+	seen    map[string]bool
+	cursors map[string]bool // Reddit "after" cursors already followed for this listing
+	after   string
+	ended   bool
+	cursor  int
+	rows    int // data rows per page
 
 	num  widgets.NumInput
 	join *widgets.TextInput
@@ -57,7 +58,7 @@ type postsMsg struct {
 // NewPostList creates a post list for area. saved says whether the area is in
 // the config already.
 func NewPostList(d *Deps, area config.Area, saved bool) *PostList {
-	s := &PostList{d: d, area: area, saved: saved, sort: reddit.Sort(d.Config.Display.DefaultSort), seen: map[string]bool{}, rows: 17}
+	s := &PostList{d: d, area: area, saved: saved, sort: reddit.Sort(d.Config.Display.DefaultSort), seen: map[string]bool{}, cursors: map[string]bool{}, rows: 17}
 	if s.sort == "" {
 		s.sort = reddit.Hot
 	}
@@ -164,19 +165,20 @@ func (s *PostList) Update(msg ui.Msg) ui.Action {
 		}
 		s.authFailed = false
 		if m.replace {
-			s.posts, s.seen, s.cursor, s.ended, s.after = nil, map[string]bool{}, 0, false, ""
+			s.posts, s.seen, s.cursors, s.cursor, s.ended, s.after = nil, map[string]bool{}, map[string]bool{}, 0, false, ""
 			s.sort = m.sort
 		}
-		wasPage := s.page()
+		wasPage, oldLen := s.page(), len(s.posts)
 		for _, p := range m.listing.Posts {
 			if !s.seen[p.ID] {
 				s.seen[p.ID] = true
 				s.posts = append(s.posts, p)
 			}
 		}
-		if m.listing.After == "" || m.listing.After == m.after {
-			s.ended = true
+		if m.listing.After == "" || s.cursors[m.listing.After] {
+			s.ended = true // no continuation, or Reddit looped back to a cursor already followed
 		}
+		s.cursors[m.listing.After] = true
 		s.after = m.listing.After
 		s.status, s.statusErr = "", false
 		if len(s.posts) == 0 {
@@ -191,9 +193,13 @@ func (s *PostList) Update(msg ui.Msg) ui.Action {
 		}
 		s.keepID = ""
 		if advance {
-			if next := (wasPage + 1) * s.rows; next < len(s.posts) {
+			next := (wasPage + 1) * s.rows
+			switch {
+			case oldLen < next && oldLen < len(s.posts):
+				s.cursor = oldLen // the current page was partial: land on the first new post
+			case next < len(s.posts):
 				s.cursor = next
-			} else if s.ended {
+			case s.ended:
 				s.status = "End of messages"
 			}
 		}

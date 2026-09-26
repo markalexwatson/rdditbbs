@@ -62,6 +62,10 @@ type Client struct {
 	sink   func([]byte) // receives bodies that failed to parse
 	moreMu sync.Mutex
 
+	freshMu  sync.Mutex
+	seq      uint64            // request sequence number
+	freshSeq map[string]uint64 // per URL: sequence of the latest Fresh request
+
 	tokenURL string
 }
 
@@ -111,7 +115,34 @@ func NewClient(cr Credentials, opts ...Option) *Client {
 		}
 	})
 	c.cache = NewCache(cacheEntries, c.now)
+	c.freshSeq = map[string]uint64{}
 	return c
+}
+
+// fetchRef identifies one request for cache-write ordering.
+type fetchRef struct {
+	url   string
+	seq   uint64
+	fresh bool
+}
+
+// begin records a request and returns its reference.
+func (c *Client) begin(u string, fresh bool) fetchRef {
+	c.freshMu.Lock()
+	defer c.freshMu.Unlock()
+	c.seq++
+	if fresh {
+		c.freshSeq[u] = c.seq
+	}
+	return fetchRef{url: u, seq: c.seq, fresh: fresh}
+}
+
+// mayStore reports whether a completed request may write the cache: never
+// when a Fresh request for the same URL started after it.
+func (c *Client) mayStore(ref fetchRef) bool {
+	c.freshMu.Lock()
+	defer c.freshMu.Unlock()
+	return ref.seq >= c.freshSeq[ref.url]
 }
 
 // Verify proves the credentials work by fetching a public listing.
@@ -129,34 +160,34 @@ func (c *Client) Posts(ctx context.Context, subreddit string, sort Sort, after s
 	if sort == Top {
 		q.Set("t", "day")
 	}
-	b, key, err := c.get(ctx, "/r/"+subreddit+"/"+string(sort), q, f.Fresh, listingTTL)
+	b, ref, err := c.get(ctx, "/r/"+subreddit+"/"+string(sort), q, f.Fresh, listingTTL)
 	if err != nil {
 		return Listing{}, err
 	}
 	l, err := ParseListing(bytes.NewReader(b))
-	return l, c.finish(key, b, listingTTL, err)
+	return l, c.finish(ref, b, listingTTL, err)
 }
 
 // Thread fetches a post and its comment forest.
 func (c *Client) Thread(ctx context.Context, subreddit, postID string, sort CommentSort, f Fetch) (Thread, error) {
 	q := url.Values{"sort": {sort.API()}, "limit": {"500"}, "depth": {"10"}}
-	b, key, err := c.get(ctx, "/r/"+subreddit+"/comments/"+postID, q, f.Fresh, threadTTL)
+	b, ref, err := c.get(ctx, "/r/"+subreddit+"/comments/"+postID, q, f.Fresh, threadTTL)
 	if err != nil {
 		return Thread{}, err
 	}
 	th, err := ParseThread(bytes.NewReader(b))
-	return th, c.finish(key, b, threadTTL, err)
+	return th, c.finish(ref, b, threadTTL, err)
 }
 
 // Subtree fetches the thread rooted at one comment.
 func (c *Client) Subtree(ctx context.Context, subreddit, postID, commentID string, sort CommentSort) (Thread, error) {
 	q := url.Values{"sort": {sort.API()}, "limit": {"500"}, "depth": {"10"}, "comment": {commentID}, "context": {"0"}}
-	b, key, err := c.get(ctx, "/r/"+subreddit+"/comments/"+postID, q, false, threadTTL)
+	b, ref, err := c.get(ctx, "/r/"+subreddit+"/comments/"+postID, q, false, threadTTL)
 	if err != nil {
 		return Thread{}, err
 	}
 	th, err := ParseThread(bytes.NewReader(b))
-	return th, c.finish(key, b, threadTTL, err)
+	return th, c.finish(ref, b, threadTTL, err)
 }
 
 // MoreChildren loads comments by ID in batches of 100, one request at a time.
@@ -181,7 +212,7 @@ func (c *Client) MoreChildren(ctx context.Context, linkFullname string, ids []st
 			return all, err
 		}
 		th, err := ParseMoreChildren(bytes.NewReader(b))
-		if err = c.finish("", b, 0, err); err != nil {
+		if err = c.finish(fetchRef{}, b, 0, err); err != nil {
 			return all, err
 		}
 		all.Comments = append(all.Comments, th.Comments...)
@@ -191,25 +222,27 @@ func (c *Client) MoreChildren(ctx context.Context, linkFullname string, ids []st
 }
 
 // get performs a GET, serving from cache unless fresh. It returns the body
-// and the cache key; the caller stores the body with finish once it parses.
-func (c *Client) get(ctx context.Context, path string, q url.Values, fresh bool, ttl time.Duration) ([]byte, string, error) {
+// and a reference the caller passes to finish once the body parses.
+func (c *Client) get(ctx context.Context, path string, q url.Values, fresh bool, ttl time.Duration) ([]byte, fetchRef, error) {
 	q.Set("raw_json", "1")
 	u := c.base + path + "?" + q.Encode()
 	if !fresh && ttl > 0 {
 		if b, ok := c.cache.Get(u); ok {
-			return b, "", nil // already cached: finish must not re-store
+			return b, fetchRef{}, nil // already cached: finish must not re-store
 		}
 	}
+	ref := c.begin(u, fresh)
 	b, err := c.do(ctx, u)
 	if err != nil {
-		return nil, "", err
+		return nil, fetchRef{}, err
 	}
-	return b, u, nil
+	return b, ref, nil
 }
 
 // finish caches a body that parsed successfully, or reports a parse failure
-// to the sink and wraps it as a ParseError. key "" means nothing to cache.
-func (c *Client) finish(key string, b []byte, ttl time.Duration, err error) error {
+// to the sink and wraps it as a ParseError. A zero ref means nothing to
+// cache; a ref overtaken by a later Fresh request is not stored either.
+func (c *Client) finish(ref fetchRef, b []byte, ttl time.Duration, err error) error {
 	if err != nil {
 		if c.sink != nil {
 			if len(b) > 64<<10 {
@@ -219,8 +252,8 @@ func (c *Client) finish(key string, b []byte, ttl time.Duration, err error) erro
 		}
 		return &ParseError{Err: err}
 	}
-	if key != "" && ttl > 0 {
-		c.cache.Put(key, b, ttl)
+	if ref.url != "" && ttl > 0 && c.mayStore(ref) {
+		c.cache.Put(ref.url, b, ttl)
 	}
 	return nil
 }
@@ -270,7 +303,9 @@ func (c *Client) do(ctx context.Context, u string) ([]byte, error) {
 			if err := c.sleep(ctx, wait); err != nil {
 				return nil, err
 			}
-			c.gate.Reset() // Retry-After takes precedence over the recorded reset
+			if resp.Header.Get("Retry-After") != "" {
+				c.gate.Reset() // Retry-After takes precedence over the recorded reset
+			}
 		default:
 			return nil, &APIError{Status: resp.StatusCode, Reason: reason(body)}
 		}

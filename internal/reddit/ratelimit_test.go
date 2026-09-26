@@ -100,3 +100,33 @@ func TestWaitForPrefersRetryAfter(t *testing.T) {
 		t.Errorf("WaitFor empty = %v", d)
 	}
 }
+
+func TestWaitForFallsBackToKnownReset(t *testing.T) {
+	clock := &fakeClock{t: time.Unix(1_790_000_000, 0)}
+	g := NewRateGate(clock.Now, nil, nil)
+	_ = g.Acquire(context.Background())
+	g.Release(headers("0", "45"))
+	if d := g.WaitFor(http.Header{}); d != 45*time.Second {
+		t.Errorf("WaitFor without headers = %v, want the recorded reset", d)
+	}
+}
+
+func TestReleaseIgnoresStaleHigherRemaining(t *testing.T) {
+	clock := &fakeClock{t: time.Unix(1_790_000_000, 0)}
+	sl := &fakeSleeper{clock: clock}
+	g := NewRateGate(clock.Now, sl.Sleep, nil)
+	_ = g.Acquire(context.Background())
+	_ = g.Acquire(context.Background())
+	g.Release(headers("1", "60"))  // the newer, exhausted snapshot arrives first
+	g.Release(headers("50", "59")) // the older, permissive snapshot arrives late
+	_ = g.Acquire(context.Background())
+	if len(sl.slept) != 1 {
+		t.Errorf("a late higher remaining must not restore quota; slept %v", sl.slept)
+	}
+	clock.Advance(time.Minute)
+	g.Release(headers("50", "600")) // a new window: accept the new count
+	_ = g.Acquire(context.Background())
+	if len(sl.slept) != 1 {
+		t.Errorf("a new reset window should be accepted; slept %v", sl.slept)
+	}
+}

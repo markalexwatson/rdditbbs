@@ -47,6 +47,12 @@ func (s *apiServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *apiServer) requestCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.requests)
+}
+
 func newTestClient(t *testing.T, srv *apiServer) (*Client, *httptest.Server, *fakeClock, *fakeSleeper) {
 	t.Helper()
 	hs := httptest.NewServer(srv)
@@ -292,5 +298,61 @@ func TestRetryAfterResetsGate(t *testing.T) {
 	}
 	if len(sl.slept) != 1 || sl.slept[0] != 3*time.Second {
 		t.Errorf("should wait Retry-After only, slept %v", sl.slept)
+	}
+}
+
+func TestStaleResponseDoesNotOverwriteFreshCache(t *testing.T) {
+	release := make(chan struct{})
+	srv := &apiServer{t: t}
+	srv.handler = func(w http.ResponseWriter, r *http.Request, n int) bool {
+		title := "fresh"
+		if n == 1 {
+			<-release
+			title = "stale"
+		}
+		fmt.Fprintf(w, `{"kind":"Listing","data":{"after":"","children":[{"kind":"t3","data":{"id":"a","name":"t3_a","title":%q}}]}}`, title)
+		return true
+	}
+	c, _, _, _ := newTestClient(t, srv)
+	ctx := context.Background()
+	done := make(chan Listing, 1)
+	go func() { l, _ := c.Posts(ctx, "linux", Hot, "", Fetch{}); done <- l }()
+	for srv.requestCount() == 0 {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if l, err := c.Posts(ctx, "linux", Hot, "", Fetch{Fresh: true}); err != nil || l.Posts[0].Title != "fresh" {
+		t.Fatalf("fresh fetch = %v %v", l, err)
+	}
+	close(release)
+	<-done
+	l, _ := c.Posts(ctx, "linux", Hot, "", Fetch{})
+	if l.Posts[0].Title != "fresh" {
+		t.Errorf("stale response overwrote the fresh cache entry: %q", l.Posts[0].Title)
+	}
+}
+
+func TestRateLimitedWithoutHeadersWaitsForKnownReset(t *testing.T) {
+	srv := &apiServer{t: t}
+	srv.handler = func(w http.ResponseWriter, r *http.Request, n int) bool {
+		switch n {
+		case 1:
+			w.Header().Set("X-Ratelimit-Remaining", "5")
+			w.Header().Set("X-Ratelimit-Reset", "40")
+			http.ServeFile(w, r, "testdata/listing.json")
+		case 2:
+			w.WriteHeader(429) // no headers at all
+		default:
+			http.ServeFile(w, r, "testdata/listing.json")
+		}
+		return true
+	}
+	c, _, _, sl := newTestClient(t, srv)
+	ctx := context.Background()
+	c.Posts(ctx, "linux", Hot, "", Fetch{})
+	if _, err := c.Posts(ctx, "rust", Hot, "", Fetch{}); err != nil {
+		t.Fatal(err)
+	}
+	if len(sl.slept) != 1 || sl.slept[0] != 40*time.Second {
+		t.Errorf("should wait for the known reset, slept %v", sl.slept)
 	}
 }

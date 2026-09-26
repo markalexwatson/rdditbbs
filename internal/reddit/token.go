@@ -68,6 +68,9 @@ func (t *TokenSource) Token(ctx context.Context) (string, error) {
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return "", &APIError{Status: resp.StatusCode, Reason: reason(body)} // typed so screens can offer login again
+	}
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("token request failed: HTTP %d", resp.StatusCode)
 	}

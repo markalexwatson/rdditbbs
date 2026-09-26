@@ -160,14 +160,17 @@ func (t *ThreadIndex) Update(msg ui.Msg) ui.Action {
 		if m.gen != t.gen {
 			return nil
 		}
+		// A later batch may fail after earlier ones succeeded: keep what arrived.
+		if len(m.things.Comments) > 0 || len(m.things.Stubs) > 0 {
+			t.model.Attach(m.stub, m.things)
+			t.refresh()
+		}
 		if m.err != nil {
 			t.fail(m.err)
 			return nil
 		}
 		t.loading = false
-		t.model.Attach(m.stub, m.things)
 		t.status = ""
-		t.refresh()
 	case subtreeMsg:
 		if m.gen != t.gen {
 			return nil

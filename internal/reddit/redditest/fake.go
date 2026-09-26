@@ -18,6 +18,7 @@ type FakeStore struct {
 	Threads  map[string]reddit.Thread
 	Subtrees map[string]reddit.Thread
 	More     reddit.Things
+	MoreErr  error // returned alongside More, for partial-batch failures
 	Err      error
 	Calls    []string
 	Block    chan struct{}
@@ -99,7 +100,7 @@ func (f *FakeStore) MoreChildren(ctx context.Context, link string, ids []string,
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.More, nil
+	return f.More, f.MoreErr
 }
 
 var _ reddit.Store = (*FakeStore)(nil)

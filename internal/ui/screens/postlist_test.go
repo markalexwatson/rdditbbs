@@ -278,3 +278,45 @@ func TestPostListStaleResultIgnored(t *testing.T) {
 	mustContain(t, sim, "Top 1")
 	mustNotContain(t, sim, "New 1")
 }
+
+func TestPostListNextAcrossRedditPageShowsNewPosts(t *testing.T) {
+	d, fs := newDeps(t)
+	fs.Listings["linux/hot/"] = redditest.SampleListing(100, "t3_p100")
+	page2 := reddit.Listing{}
+	for i := 101; i <= 200; i++ {
+		page2.Posts = append(page2.Posts, redditest.SamplePost("p"+itoa(i), "Post "+itoa(i)))
+	}
+	fs.Listings["linux/hot/t3_p100"] = page2
+	app, sim := run(t, NewPostList(d, linuxArea, true))
+	pump(t, app)
+	for i := 0; i < 5; i++ {
+		press(app, term.R('n'))
+	}
+	mustContain(t, sim, "Post 86", "Post 100", "Page 6")
+	press(app, term.R('n')) // fetches the next Reddit page
+	pump(t, app)
+	mustContain(t, sim, "Post 101", "Post 102", "Page 6")
+	if pl := app.Top().(*PostList); pl.cursor != 100 {
+		t.Errorf("cursor should land on the first newly loaded post (index 100), got %d", pl.cursor)
+	}
+	press(app, term.R('n'))
+	mustContain(t, sim, "Post 103", "Page 7")
+}
+
+func TestPostListCursorCycleEnds(t *testing.T) {
+	d, fs := newDeps(t)
+	fs.Listings["linux/hot/"] = redditest.SampleListing(2, "A")
+	fs.Listings["linux/hot/A"] = reddit.Listing{Posts: []*reddit.Post{redditest.SamplePost("p3", "Post 3")}, After: "B"}
+	fs.Listings["linux/hot/B"] = reddit.Listing{Posts: []*reddit.Post{redditest.SamplePost("p1", "Post 1")}, After: "A"} // Reddit loops back
+	app, sim := run(t, NewPostList(d, linuxArea, true))
+	pump(t, app)
+	press(app, term.K(term.KeyEnd), term.K(term.KeyDown))
+	pump(t, app)
+	press(app, term.K(term.KeyEnd), term.K(term.KeyDown))
+	pump(t, app)
+	press(app, term.K(term.KeyDown))
+	mustContain(t, sim, "End of messages")
+	if fs.CallCount() != 3 {
+		t.Errorf("a repeated cursor must end paging; calls = %d", fs.CallCount())
+	}
+}

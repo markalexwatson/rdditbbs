@@ -2,6 +2,7 @@ package reddit
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -81,7 +82,9 @@ func TestTokenBadCredentials(t *testing.T) {
 	srv := tokenServer(t, &hits, 3600)
 	defer srv.Close()
 	ts := NewTokenSource(TokenConfig{ClientID: "wrong", ClientSecret: "x", UserAgent: "test-agent/1", URL: srv.URL + "/api/v1/access_token"})
-	if _, err := ts.Token(context.Background()); err == nil {
-		t.Error("expected error for rejected credentials")
+	_, err := ts.Token(context.Background())
+	var ae *APIError
+	if !errors.As(err, &ae) || ae.Status != 401 {
+		t.Errorf("rejected credentials should be a typed 401 so screens can offer login again, got %v", err)
 	}
 }
