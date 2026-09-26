@@ -4,6 +4,20 @@ A terminal Reddit reader that looks and feels like a 1990s bulletin board
 system: hotkey menus, a command prompt, numbered messages, a threaded
 comment index with a peek pane, and a one-message reader. Read-only.
 
+![Thread index: a tree of comments with a peek pane](docs/screenshots/threadindex.png)
+
+## Screens
+
+| | |
+| --- | --- |
+| ![Logon splash](docs/screenshots/splash.png) | ![Main menu](docs/screenshots/mainmenu.png) |
+| ![Message areas](docs/screenshots/arealist.png) | ![Post list](docs/screenshots/postlist.png) |
+| ![Message reader](docs/screenshots/reader.png) | ![Help overlay](docs/screenshots/help.png) |
+| ![Goodbye](docs/screenshots/goodbye.png) | |
+
+The screenshots are captured from the program itself on a 100 by 30
+simulated terminal with sample data; `make screenshots` regenerates them.
+
 ## Setup
 
 1. Build: `make build` (needs Go 1.27). The binary is `bin/redditbbs`, statically linked.
