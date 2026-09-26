@@ -667,7 +667,7 @@ func TestRenderStripsEscapes(t *testing.T) {
 	if got := LineText(d.Lines[0]); got != "safe red text here" {
 		t.Errorf("text = %q", got)
 	}
-	d = Render("title \x1b]0;evil\x07set \x1b]2;x\x1b\\done \x85 c1", 80)
+	d = Render("title \x1b]0;evil\x07set \x1b]2;x\x1b\\done \u0085 c1", 80)
 	if got := LineText(d.Lines[0]); got != "title set done  c1" {
 		t.Errorf("OSC/C1 text = %q", got)
 	}
@@ -1736,6 +1736,7 @@ package term
 
 import (
 	"strings"
+	"sync"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/uniseg"
@@ -1750,6 +1751,7 @@ type simCell struct {
 // Sim is an in-memory Terminal for tests. It records every cell itself and
 // forwards drawing to a tcell simulation screen so the real code path runs.
 type Sim struct {
+	mu     sync.Mutex // Run draws from its own goroutine while tests read String()
 	s      tcell.SimulationScreen
 	w, h   int
 	cells  [][]simCell
@@ -1780,8 +1782,13 @@ func (m *Sim) reset(w, h int) {
 }
 
 // Size reports the simulated size.
-func (m *Sim) Size() (int, int) { return m.w, m.h }
+func (m *Sim) Size() (int, int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.w, m.h
+}
 
+// set assumes m.mu is held.
 func (m *Sim) set(x, y int, cluster string, w int, st Style) {
 	if y < 0 || y >= m.h || x < 0 || x+w > m.w {
 		return
@@ -1796,6 +1803,8 @@ func (m *Sim) set(x, y int, cluster string, w int, st Style) {
 
 // Put draws one cluster.
 func (m *Sim) Put(x, y int, cluster string, st Style) int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	w := uniseg.StringWidth(cluster)
 	if w == 0 || cluster == "" || x+w > m.w || x < 0 || y < 0 || y >= m.h {
 		return 0
@@ -1806,6 +1815,8 @@ func (m *Sim) Put(x, y int, cluster string, st Style) int {
 
 // Text draws s clipped to maxWidth and the right edge.
 func (m *Sim) Text(x, y int, s string, st Style, maxWidth int) int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if x < 0 || y < 0 || y >= m.h {
 		return 0
 	}
@@ -1817,6 +1828,8 @@ func (m *Sim) Text(x, y int, s string, st Style, maxWidth int) int {
 
 // Fill sets a rectangle to r.
 func (m *Sim) Fill(x, y, w, h int, r rune, st Style) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	for yy := y; yy < y+h && yy < m.h; yy++ {
 		for xx := x; xx < x+w && xx < m.w; xx++ {
 			if xx >= 0 && yy >= 0 {
@@ -1827,13 +1840,25 @@ func (m *Sim) Fill(x, y, w, h int, r rune, st Style) {
 }
 
 // ShowCursor records the cursor position.
-func (m *Sim) ShowCursor(x, y int) { m.curX, m.curY, m.curOn = x, y, true }
+func (m *Sim) ShowCursor(x, y int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.curX, m.curY, m.curOn = x, y, true
+}
 
 // HideCursor hides it.
-func (m *Sim) HideCursor() { m.curOn = false }
+func (m *Sim) HideCursor() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.curOn = false
+}
 
 // Cursor reports the cursor state.
-func (m *Sim) Cursor() (int, int, bool) { return m.curX, m.curY, m.curOn }
+func (m *Sim) Cursor() (int, int, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.curX, m.curY, m.curOn
+}
 
 // Events is the injected event stream.
 func (m *Sim) Events() <-chan Event { return m.events }
@@ -1843,8 +1868,10 @@ func (m *Sim) Inject(ev Event) { m.events <- ev }
 
 // Resize changes the size and queues a Resize event.
 func (m *Sim) Resize(w, h int) {
+	m.mu.Lock()
 	m.s.SetSize(w, h)
 	m.reset(w, h)
+	m.mu.Unlock()
 	m.Inject(Resize{W: w, H: h})
 }
 
@@ -1855,6 +1882,8 @@ func (m *Sim) Fini() { m.s.Fini() }
 
 // Clear blanks every cell.
 func (m *Sim) Clear() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.s.Clear()
 	m.reset(m.w, m.h)
 }
@@ -1862,6 +1891,8 @@ func (m *Sim) Clear() {
 // CellAt returns the cluster and style at x,y. Continuation cells of a wide
 // cluster return "".
 func (m *Sim) CellAt(x, y int) (string, Style) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if y < 0 || y >= m.h || x < 0 || x >= m.w {
 		return "", Style{}
 	}
@@ -1871,6 +1902,13 @@ func (m *Sim) CellAt(x, y int) (string, Style) {
 
 // Row returns row y as text with trailing spaces removed.
 func (m *Sim) Row(y int) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.row(y)
+}
+
+// row assumes m.mu is held.
+func (m *Sim) row(y int) string {
 	var b strings.Builder
 	for _, c := range m.cells[y] {
 		switch {
@@ -1886,9 +1924,11 @@ func (m *Sim) Row(y int) string {
 
 // String returns every row joined by newlines.
 func (m *Sim) String() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	rows := make([]string, m.h)
 	for y := range rows {
-		rows[y] = m.Row(y)
+		rows[y] = m.row(y)
 	}
 	return strings.Join(rows, "\n")
 }
@@ -2200,6 +2240,21 @@ func TestParseThread(t *testing.T) {
 	}
 	if th.More == nil || th.More.Count != 40 || th.More.ParentFullname != "t3_aaa" {
 		t.Errorf("thread more = %+v", th.More)
+	}
+}
+
+func TestMergeStubs(t *testing.T) {
+	a := &MoreStub{ParentFullname: "t1_p", Count: 2, IDs: []string{"a", "b"}}
+	b := &MoreStub{ParentFullname: "t1_p", Count: 1, IDs: []string{"c"}}
+	cont := &MoreStub{ParentFullname: "t1_p"}
+	if m := mergeStubs(a, b); m.Count != 3 || len(m.IDs) != 3 {
+		t.Errorf("merge = %+v", m)
+	}
+	if m := mergeStubs(cont, a); m != a {
+		t.Error("a continue stub should give way to a stub with IDs")
+	}
+	if m := mergeStubs(nil, cont); m != cont || !m.IsContinue() {
+		t.Error("a lone continue stub is kept")
 	}
 }
 
@@ -2614,10 +2669,28 @@ func parseForest(children []thing, depth int) ([]*Comment, *MoreStub, error) {
 			if err != nil {
 				return nil, nil, err
 			}
-			more = m
+			more = mergeStubs(more, m)
 		}
 	}
 	return out, more, nil
+}
+
+// mergeStubs combines two stubs for the same parent. Reddit sends one per
+// listing level, but if it ever sends more, no reply IDs are lost. A
+// "continue this thread" stub (no IDs) is kept only when it stands alone,
+// because loading the IDs is the more useful action.
+func mergeStubs(a, b *MoreStub) *MoreStub {
+	switch {
+	case a == nil:
+		return b
+	case b == nil:
+		return a
+	case a.IsContinue():
+		return b
+	case b.IsContinue():
+		return a
+	}
+	return &MoreStub{ParentFullname: a.ParentFullname, Count: a.Count + b.Count, IDs: append(append([]string(nil), a.IDs...), b.IDs...)}
 }
 
 func parseComment(raw json.RawMessage, depth int) (*Comment, error) {
@@ -2877,12 +2950,7 @@ func Attach(t *Thread, stub *MoreStub, th Things) int {
 		for _, id := range s.IDs {
 			returned[id] = true
 		}
-		if existing := currentStub(t, index, s.ParentFullname); existing != nil && existing != stub {
-			existing.IDs = append(existing.IDs, s.IDs...)
-			existing.Count += s.Count
-			continue
-		}
-		setStub(s.ParentFullname, s)
+		setStub(s.ParentFullname, mergeStubs(currentStub(t, index, s.ParentFullname), s))
 	}
 
 	if stub != nil {
@@ -2894,11 +2962,7 @@ func Attach(t *Thread, stub *MoreStub, th Things) int {
 		}
 		if len(remaining) > 0 {
 			ns := &MoreStub{ParentFullname: stub.ParentFullname, Count: len(remaining), IDs: remaining}
-			if existing := currentStub(t, index, stub.ParentFullname); existing != nil {
-				ns.IDs = append(existing.IDs, remaining...)
-				ns.Count = len(ns.IDs)
-			}
-			setStub(stub.ParentFullname, ns)
+			setStub(stub.ParentFullname, mergeStubs(currentStub(t, index, stub.ParentFullname), ns))
 		}
 	}
 	return attached
@@ -7063,7 +7127,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 - Test: `internal/ui/screens/splash_test.go`, `internal/ui/screens/mainmenu_test.go`, `internal/ui/screens/arealist_test.go`
 
 **Interfaces:**
-- Consumes: `Deps`, `Rune`, `IsBack`, `validSubreddit`, `errText` (Task 15); `NewGoodbye` (Task 15); `NewSetup` (Task 17, referenced by Splash: add a stub `func NewSetup(d *Deps) ui.Screen` returning `NewMainMenu(d)` in `setup.go` for this task only if Task 17 has not landed; Task 17 replaces it); `NewPostList(d *Deps, area config.Area, saved bool) ui.Screen` (Task 18: until it lands, `arealist.go` and `mainmenu.go` call a package-level variable `var newPostList = func(d *Deps, area config.Area, saved bool) ui.Screen { return NewMainMenu(d) }` which Task 18 reassigns to the real constructor).
+- Consumes: `Deps`, `Rune`, `IsBack`, `validSubreddit`, `errText`, `placeholder` (Task 15); `NewGoodbye` (Task 15); `NewSetup` (Task 17, referenced by Splash: until it lands, a stub `func NewSetup(d *Deps) ui.Screen` in `setup.go` returns `&placeholder{name: "setup"}`); `NewPostList` (Task 18: until it lands, `arealist.go` and `mainmenu.go` call the package variable `newPostList`, which returns `&placeholder{name: "post list"}` and which Task 18 reassigns).
 - Produces: `NewSplash(d *Deps) *Splash`, `NewMainMenu(d *Deps) *MainMenu`, `NewAreaList(d *Deps) *AreaList`.
 
 - [ ] **Step 1: Write the failing tests**
@@ -7688,6 +7752,20 @@ func TestSetupNestedPopsOnSuccessAndEscape(t *testing.T) {
 	}
 }
 
+func TestSetupPastedEnterDoesNotSubmit(t *testing.T) {
+	d, _ := setupDeps(t)
+	app, sim := run(t, NewSetup(d))
+	for _, r := range "myid" {
+		app.Handle(term.Key{Code: term.KeyRune, Rune: r, Paste: true})
+	}
+	app.Handle(term.Key{Code: term.KeyEnter, Paste: true})
+	app.Draw()
+	mustNotContain(t, sim, "Checking credentials", "Both fields are required")
+	if s := app.Top().(*Setup); s.focus != 0 || s.id.Value != "myid" {
+		t.Errorf("pasted Enter changed state: focus=%d id=%q", s.focus, s.id.Value)
+	}
+}
+
 func TestSetupWorkerPanicClearsBusy(t *testing.T) {
 	d, _ := setupDeps(t)
 	s := NewSetup(d)
@@ -7843,16 +7921,18 @@ func (s *Setup) HandleKey(k term.Key) ui.Action {
 	if s.busy {
 		return nil
 	}
-	switch k.Code {
-	case term.KeyTab:
-		s.focus = 1 - s.focus
-		return nil
-	case term.KeyEnter:
-		if s.focus == 0 {
-			s.focus = 1
+	if !k.Paste {
+		switch k.Code {
+		case term.KeyTab:
+			s.focus = 1 - s.focus
 			return nil
+		case term.KeyEnter:
+			if s.focus == 0 {
+				s.focus = 1
+				return nil
+			}
+			return s.submit()
 		}
-		return s.submit()
 	}
 	if s.focus == 0 {
 		s.id.HandleKey(k)
@@ -8051,6 +8131,26 @@ func TestPostListPagination(t *testing.T) {
 	if fs.CallCount() != 2 {
 		t.Errorf("store calls = %d, want 2", fs.CallCount())
 	}
+}
+
+func TestPostListPgDnCompletesAfterFetch(t *testing.T) {
+	d, fs := newDeps(t)
+	fs.Listings["linux/hot/"] = redditest.SampleListing(20, "t3_p20")
+	page2 := reddit.Listing{}
+	for i := 21; i <= 40; i++ {
+		page2.Posts = append(page2.Posts, redditest.SamplePost("p"+itoa(i), "Post "+itoa(i)))
+	}
+	fs.Listings["linux/hot/t3_p20"] = page2
+	app, sim := run(t, NewPostList(d, linuxArea, true))
+	pump(t, app)
+	press(app, term.K(term.KeyEnd))  // cursor 19 (Post 20)
+	press(app, term.K(term.KeyPgDn)) // wants 36: fetch, owed 17
+	pump(t, app)
+	pl := app.Top().(*PostList)
+	if pl.cursor != 36 {
+		t.Errorf("cursor after PgDn+fetch = %d, want 36", pl.cursor)
+	}
+	mustContain(t, sim, "Post 37", "Page 3")
 }
 
 func TestPostListDownAtEndFetchesMore(t *testing.T) {
@@ -8270,6 +8370,7 @@ type PostList struct {
 
 	loading        bool
 	pendingAdvance bool
+	pendingMove    int    // cursor delta still owed after a paging fetch (0 when none)
 	keepID         string // reselect this post after a replacing fetch
 	authFailed     bool
 	gen            int
@@ -8368,7 +8469,7 @@ func (s *PostList) fetch(after string, replace, fresh bool) ui.Action {
 	s.status, s.statusErr = "Retrieving...", false
 	sort := s.sort
 	if replace {
-		s.pendingAdvance = false
+		s.pendingAdvance, s.pendingMove = false, 0
 		sort = s.reqSort
 	}
 	store, sub := s.d.Store, s.area.Subreddit
@@ -8385,8 +8486,8 @@ func (s *PostList) Update(msg ui.Msg) ui.Action {
 			return nil
 		}
 		s.loading = false
-		advance := s.pendingAdvance
-		s.pendingAdvance = false
+		advance, owed := s.pendingAdvance, s.pendingMove
+		s.pendingAdvance, s.pendingMove = false, 0
 		if m.err != nil {
 			s.reqSort = s.sort // a failed sort change leaves the old sort in force
 			s.keepID = ""
@@ -8429,10 +8530,16 @@ func (s *PostList) Update(msg ui.Msg) ui.Action {
 				s.status = "End of messages"
 			}
 		}
+		if owed > 0 {
+			s.cursor += owed
+			if s.cursor >= len(s.posts) && s.ended {
+				s.status = "End of messages"
+			}
+		}
 		s.clamp()
 	case ui.ErrMsg:
 		s.loading = false
-		s.pendingAdvance = false
+		s.pendingAdvance, s.pendingMove = false, 0
 		s.reqSort = s.sort
 		s.status, s.statusErr = errText(m.Err), true
 	case linkExit:
@@ -8623,11 +8730,13 @@ func (s *PostList) move(delta int) ui.Action {
 	}
 	target := s.cursor + delta
 	if target >= len(s.posts) {
+		owed := target - (len(s.posts) - 1)
 		s.cursor = len(s.posts) - 1
 		switch {
 		case s.ended:
 			s.status, s.statusErr = "End of messages", false
 		case !s.loading:
+			s.pendingMove = owed
 			return s.fetch(s.after, false, false)
 		}
 		return nil
@@ -9967,7 +10076,7 @@ func TestReaderShowsComment(t *testing.T) {
 		"Subj: Kernel 7.2 released", "From: sched_nerd", "(+412)", "Date: 26/09/26",
 		"Re: original post", "depth 0", "1 loaded replies",
 		"The EEVDF changes are the headline.", "Lazy preemption is the real win.",
-		"Msg 1 of 4", "Read Message",
+		"Msg 1 of 7", "Read Message",
 	)
 	if d.Session.MessagesRead != 1 {
 		t.Errorf("MessagesRead = %d", d.Session.MessagesRead)
@@ -9977,15 +10086,15 @@ func TestReaderShowsComment(t *testing.T) {
 func TestReaderNextPrevAndBounds(t *testing.T) {
 	app, sim, d, _ := readerAt(t, "c1")
 	press(app, term.R('n'))
-	mustContain(t, sim, "Agreed.", "Re: #1 sched_nerd", "depth 1", "Msg 2 of 4")
+	mustContain(t, sim, "Agreed.", "Re: #1 sched_nerd", "depth 1", "Msg 2 of 7")
 	press(app, term.R('n'))
-	mustContain(t, sim, "Body survives the account.", "From: [deleted]")
+	mustContain(t, sim, "Body survives the account.", "From: [deleted]", "Msg 4 of 7") // row 3 is a stub
 	press(app, term.R('n'))
-	mustContain(t, sim, "[removed]", "From: modbot")
+	mustContain(t, sim, "[removed]", "From: modbot", "Msg 5 of 7")
 	press(app, term.R('n'))
-	mustContain(t, sim, "No more messages", "Msg 4 of 4")
+	mustContain(t, sim, "No more messages", "Msg 5 of 7")
 	press(app, term.R('p'), term.R('p'), term.R('p'), term.R('p'))
-	mustContain(t, sim, "Msg 0 of 4", "From: torvaldsfan", "https://example.com/aaa")
+	mustContain(t, sim, "Msg 0 of 7", "From: torvaldsfan", "https://example.com/aaa")
 	press(app, term.R('p'))
 	mustContain(t, sim, "No more messages")
 	if d.Session.MessagesRead != 8 {
@@ -9996,9 +10105,9 @@ func TestReaderNextPrevAndBounds(t *testing.T) {
 func TestReaderUp(t *testing.T) {
 	app, sim, _, _ := readerAt(t, "c2")
 	press(app, term.R('u'))
-	mustContain(t, sim, "Msg 1 of 4", "From: sched_nerd")
+	mustContain(t, sim, "Msg 1 of 7", "From: sched_nerd")
 	press(app, term.R('u'))
-	mustContain(t, sim, "Msg 0 of 4")
+	mustContain(t, sim, "Msg 0 of 7")
 	press(app, term.R('u'))
 	mustContain(t, sim, "Already at top")
 }
@@ -10026,7 +10135,7 @@ func TestReaderRepliesJump(t *testing.T) {
 		t.Fatal("help opened during reply selection")
 	}
 	press(app, term.R('1'), term.K(term.KeyEnter))
-	mustContain(t, sim, "Agreed.", "Msg 2 of 4")
+	mustContain(t, sim, "Agreed.", "Msg 2 of 7")
 	mustNotContain(t, sim, "Reply #:")
 }
 
@@ -10098,7 +10207,7 @@ func TestReaderRepliesIncludeCollapsedAndReveal(t *testing.T) {
 	press(app, term.R('r'))
 	mustContain(t, sim, "1. torvaldsfan")
 	press(app, term.R('1'), term.K(term.KeyEnter))
-	mustContain(t, sim, "Agreed.", "Msg 2 of 4")
+	mustContain(t, sim, "Agreed.", "Msg 2 of 7")
 	if m.IsCollapsed("c1") {
 		t.Error("jumping to a hidden reply should reveal it")
 	}
@@ -10117,7 +10226,7 @@ func TestReaderIgnoresPostMoreStubForReplies(t *testing.T) {
 	d, _ := newDeps(t)
 	th := reddit.Thread{Post: redditest.SamplePost("z", "Empty"), More: &reddit.MoreStub{ParentFullname: "t3_z", Count: 3, IDs: []string{"a"}}}
 	app, sim := run(t, NewReader(d, threadmodel.New(th, 10), ""))
-	mustContain(t, sim, "Msg 0 of 0")
+	mustContain(t, sim, "Msg 0 of 1") // the lone stub is row 1
 	press(app, term.R('n'))
 	mustContain(t, sim, "No more messages")
 	press(app, term.R('r'))
@@ -10182,8 +10291,16 @@ func (r *Reader) Init() ui.Action {
 
 func (r *Reader) Title() string { return "Read Message" }
 
+// Info shows the current message's Thread Index row number (0 for the post)
+// over the total row count, so numbers match between the two screens.
 func (r *Reader) Info() string {
-	return fmt.Sprintf("Msg %d of %d", r.pos(), len(r.model.Comments()))
+	n, total := 0, len(r.model.Rows())
+	if r.curID != "" {
+		if i := r.model.IndexOf(r.curID); i >= 0 {
+			n = i + 1
+		}
+	}
+	return fmt.Sprintf("Msg %d of %d", n, total)
 }
 
 func (r *Reader) Keys() []ui.KeyHelp {
@@ -10202,7 +10319,12 @@ func (r *Reader) Prompt() widgets.Prompt {
 	return widgets.Prompt{Status: r.status, Error: r.statusErr}
 }
 
-func (r *Reader) Update(ui.Msg) ui.Action { return nil }
+func (r *Reader) Update(msg ui.Msg) ui.Action {
+	if le, ok := msg.(linkExit); ok && le.Err != nil {
+		r.status, r.statusErr = "Browser exited with an error. URL: "+le.URL, true
+	}
+	return nil
+}
 
 // pos is the 1-based position of the current comment among the visible
 // comments, or 0 for the post. A comment that is no longer visible falls
@@ -10314,15 +10436,8 @@ func (r *Reader) Draw(c term.Canvas) {
 	}
 }
 
-// indexOf is a comment's 1-based position among visible comments, 0 if hidden.
-func (r *Reader) indexOf(id string) int {
-	for i, c := range r.model.Comments() {
-		if c.ID == id {
-			return i + 1
-		}
-	}
-	return 0
-}
+// indexOf is a comment's Thread Index row number, 0 if hidden.
+func (r *Reader) indexOf(id string) int { return r.model.IndexOf(id) + 1 }
 
 func (r *Reader) drawReplies(c term.Canvas, y, w int) {
 	c.Text(2, y, "Replies to this message:", theme.Style(theme.Heading), w-4)
@@ -10559,7 +10674,7 @@ func TestSmokeWalkthrough(t *testing.T) {
 	mustContain(t, sim, "Read Message", "The EEVDF changes are the headline.")
 
 	press(app, term.R('n'))
-	mustContain(t, sim, "Agreed.", "Msg 2 of 4")
+	mustContain(t, sim, "Agreed.", "Msg 2 of 7")
 
 	press(app, term.R('t'))
 	ti, ok := app.Top().(*ThreadIndex)
@@ -10626,7 +10741,7 @@ func TestSmokeRunLoop(t *testing.T) {
 }
 ```
 
-`smoke_test.go` imports `strings`, `testing`, `time`, `redditest`, `term` and `ui`. Reading `sim.String()` while `Run` draws from another goroutine is a benign race for this assertion loop; run this test without `-race` or guard `Sim` with a mutex if you enable the race detector project-wide.
+`smoke_test.go` imports `strings`, `testing`, `time`, `redditest`, `term` and `ui`. `Sim` guards its grid with a mutex (Task 4), so reading `sim.String()` while `Run` draws from another goroutine is race-clean; `go test -race ./...` must pass.
 
 - [ ] **Step 2: Run the smoke tests**
 
@@ -10898,7 +11013,7 @@ linters-settings:
 
 - [ ] **Step 7: Run everything**
 
-Run: `make test lint && make build && ./bin/redditbbs --version && file bin/redditbbs`
+Run: `make test lint && go test -race ./internal/ui/... && make build && ./bin/redditbbs --version && file bin/redditbbs`
 Expected: all packages PASS, lint clean (or the vet-only notice), version printed, `file` reports a statically linked executable.
 
 - [ ] **Step 8: Write the README**
