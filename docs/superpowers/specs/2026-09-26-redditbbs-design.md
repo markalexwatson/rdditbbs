@@ -1,7 +1,7 @@
 # RedditBBS design
 
 Date: 26/09/2026
-Status: revision 2 after Codex review
+Status: revision 3 after two Codex review rounds
 
 ## 1. Purpose
 
@@ -57,9 +57,9 @@ One Go module, `github.com/markwatson/redditbbs`, with a single binary at
 
 | Package | Responsibility | Depends on |
 | --- | --- | --- |
-| `internal/term` | `Canvas` interface, `Style`, key and event types, tcell implementation and a simulation implementation for tests. The only package that imports tcell | tcell, uniseg |
+| `internal/term` | `Canvas` and `Terminal` interfaces, `Style`, key and event types, tcell implementation and a simulation implementation for tests. The only package that imports tcell | tcell, uniseg |
 | `internal/theme` | Named colour roles mapped to `term.Style`. Nothing else names a colour | term |
-| `internal/textfmt` | Markdown subset to styled lines, grapheme-aware width, wrap, truncate, link extraction, relative time, score formatting | uniseg |
+| `internal/textfmt` | Markdown subset to lines of typed spans (text, quote, code, bold, link), grapheme-aware width, wrap, truncate, link extraction, relative time, score formatting | uniseg |
 | `internal/ui` | `App` loop, `Screen` interface, actions, async requests, overlay composition, undersized-terminal override | term, theme |
 | `internal/ui/widgets` | Drawing helpers: title bar, table with cursor row, styled text box with scrolling, hotkey bar, prompt and status line, text input, tree connectors | term, theme, textfmt |
 | `internal/ui/screens` | One file per screen | ui, widgets, reddit (via Store), config, session |
@@ -86,13 +86,19 @@ type Canvas interface {
 }
 ```
 
+`Terminal` extends `Canvas` with `Events() <-chan Event`, `Show()`,
+`Sync()`, `Clear()` and `Fini()`, and is what App drives; the tcell and
+simulation implementations both satisfy it.
+
 `Style` is `term`'s own value type (foreground, background, bold,
-reverse) so no other package imports tcell. The tcell implementation wraps
+reverse) so no other package imports tcell. tcell is pinned in `go.mod`
+to the version the tests were written against. The tcell implementation wraps
 a `tcell.Screen` and splits text into grapheme clusters with `uniseg`,
 passing the first rune as the main rune and the rest as combining runes to
-`SetContent`. Width is measured per cluster, so combining marks, variation
-selectors and joined emoji occupy the right number of cells and are never
-split by clipping or wrapping.
+`SetContent`. Width is measured per cluster with `uniseg`, and clipping and wrapping
+operate on clusters, so a cluster is never split. Terminals differ in how
+they render some emoji sequences; the guarantee is only that our column
+arithmetic and tcell's agree.
 
 The abstraction exists as a test seam and to keep tcell out of the UI
 code. It does not by itself make a telnet or ssh server possible; that
@@ -117,9 +123,10 @@ type Screen interface {
 type Action interface{}
 ```
 
-`App` owns the screen stack, the tcell screen, and one `results` channel.
-The loop selects on `tcell.Screen.ChannelEvents` and `results`, so delivery
-does not depend on `PostEvent` and its bounded queue. Each iteration:
+`App` owns the screen stack, a `term.Terminal`, one `results` channel and
+a `done` channel closed at shutdown. The loop selects on
+`Terminal.Events()` and `results`; workers send with a select on `done` so
+they never block after shutdown. Each iteration:
 translate the event into a `Key`, `Resize` or async `Msg`, dispatch, apply
 the returned Action, then clear the buffer, call `Draw` on the visible
 screens, and `Show()`. Ctrl-L calls `Sync()` to repair a corrupted
@@ -137,12 +144,14 @@ they need and never touch screen state.
 
 Order of applying a `Batch`: navigation actions first, then `Run`s are
 bound to whichever instance returned the Batch, so a screen may `Push` a
-new screen whose own `Init` returns the `Run`. A `Run` returned by a screen
-that is not on top is still bound to that screen.
+new screen whose own `Init` returns the `Run`. If the Batch removed that
+instance from the stack, its `Run`s are discarded without running. A `Run`
+returned by a screen that is not on top is still bound to that screen.
 
 `Pop{Result}` removes the top screen and delivers `PopResult{Result}` to
-the new top screen's `Update`. This is how Message Reader hands the
-selected comment ID back to Thread Index.
+the new top screen's `Update`. `Result` is `any`; each producing screen
+documents its concrete type, for example Message Reader returns
+`SelectComment{ID string}` to Thread Index.
 
 Covered screens do not receive keys. They do receive `Update` for their
 own async results and `Resize`. A navigation Action returned from a
@@ -153,7 +162,9 @@ on the context and returns a `Tick` message. Cancellation on pop means no
 stray ticks.
 
 Overlays: the Help screen sets `Overlay() bool` (an optional interface).
-App draws the screen beneath first, then the overlay.
+App draws the screen beneath first, then the overlay. App constructs Help
+itself when `?` is pressed, passing the top screen's `Keys()` and
+`Title()`.
 
 Undersized terminal: when the size is below 80x24, App keeps the stack
 intact, draws a centred "Please enlarge your terminal to 80x24" message
@@ -227,8 +238,10 @@ Explains in BBS voice how to register a script app at
 `https://www.reddit.com/prefs/apps`, that Reddit may require approval of
 the app, and prompts for client ID and secret. On submit it obtains a
 token and then fetches `Posts("linux", Hot, "")` to prove real access. On
-success it saves `config.toml` with the default areas and replaces itself
-with Main Menu. On failure it shows the error text and lets the user edit
+success it saves the credentials into `config.toml`, adds the default
+areas only when the config has no areas at all, and replaces itself with
+Main Menu. Reopening Setup after a 401 therefore never disturbs existing
+areas. On failure it shows the error text and lets the user edit
 and retry or quit.
 
 ### 4.4 Main Menu
@@ -257,43 +270,50 @@ and age. Subject truncates with `…`. Stickied posts show `*` before the
 subject in yellow. Link posts show the domain in grey after the subject
 when width allows. NSFW posts show `[X]` in red.
 
-Post numbers are page-local, 1 to the number of rows on the screen. The
-client requests 100 posts per Reddit page and the screen paginates locally
-in blocks of the content height. `N` moves to the next local page,
+Post numbers are page-local, 1 to the number of data rows on the screen,
+which is the content height minus the two heading rows. The client
+requests 100 posts per Reddit page and the screen paginates locally in
+blocks of that data-row count; the last local page may be partially
+filled. `N` moves to the next local page,
 fetching the next Reddit page with `after` when the loaded posts are
-exhausted and `after` is non-null; at the true end the status line says
-"End of messages". `P` moves to the previous local page. PgDn and PgUp
+exhausted and `after` is non-null; at the true end, or when Reddit returns
+the same `after` cursor twice, the status line says "End of messages". `P` moves to the previous local page. PgDn and PgUp
 move the cursor by a page within loaded posts and follow the same
 fetching rule. A resize re-paginates so that the selected post stays
 visible. Posts with an ID already loaded are skipped when a new page
 arrives.
 
 Keys: Enter or number pushes Thread Index. `S` cycles hot, new, top (day),
-rising; this bumps the generation, clears loaded posts and resets the
-cursor. `J` joins another area (replaces this screen). `A` saves this area
+rising; this bumps the generation and starts a fetch while the current
+posts stay on screen with "Retrieving..." in the status line. When the new
+listing arrives it replaces the posts and resets the cursor; on failure
+the old posts remain with the error shown. `J` joins another area (replaces this screen). `A` saves this area
 to config when it came from Join and is not yet saved. `O` opens the
 post's URL in the browser. `R` refetches the first page with `Fresh` and
 discards later pages.
 
 ### 4.7 Thread Index
 
-Top of content: post subject, author, score, age, comment count, and for a
-self post the first lines of the body up to a quarter of the content
-height. `B` opens the full post body in Message Reader as message 0.
+Row budget within the content area, top to bottom: post header of 2 rows
+plus, for a self post, body preview rows up to a quarter of the content
+height; a rule; the comment table with its heading row; a rule; the peek
+pane. The comment table gets whatever remains and never fewer than 5 data
+rows, shrinking the body preview first and then the peek pane to achieve
+that. `B` opens the full post body in Message Reader as message 0.
 
 Below: one row per visible comment: thread-local number, score, tree
 connector, author, first line of the body as a preview. Numbers are
 assigned in display order over loaded comments and are reassigned after
 sort, refresh, expansion or collapse; the selected comment is tracked by
 ID. Authors are green, the original poster bright cyan, moderator
-distinguished comments magenta, deleted or removed comments grey with
-`[deleted]` as the preview.
+distinguished comments magenta. A comment whose author is deleted shows
+`[deleted]` in grey as the author but keeps its body. A comment whose body
+is removed or deleted shows `[removed]` or `[deleted]` in grey as the
+preview.
 
-Peek pane: the bottom third of the content area, at least 5 rows,
-separated by a grey rule, showing the selected comment's author, score,
-age and wrapped body. Space scrolls the pane. `Tab` hides or shows it;
-the comment table takes the freed rows. The comment table always keeps at
-least 5 rows.
+Peek pane: a third of the content area, at least 5 rows, showing the
+selected comment's author, score, age and wrapped body. Space scrolls the
+pane. `Tab` hides or shows it; the comment table takes the freed rows.
 
 Tree connectors use two columns per depth with `├─`, `└─` and `│`. Beyond
 a depth of `w/8` levels the row stays at the maximum indent with a `»`
@@ -332,11 +352,12 @@ Links: [1] https://…  [2] https://…
 Message 0 is the post itself: `From` is the post author and `Re:` is
 omitted.
 
-Traversal order is the Thread Index's visible order: loaded comments,
-excluding collapsed descendants and stubs. `N` and `P` move through it and
-stop at the ends with "No more messages". `U` jumps to the parent; at
-depth 0 it goes to message 0. `R` shows a numbered list of loaded direct
-replies to jump to. `T` returns `Pop{Result: commentID}` so Thread Index
+Traversal order is message 0 followed by the Thread Index's visible
+order: loaded comments, excluding collapsed descendants and stubs. `N` and
+`P` move through it and stop at the ends with "No more messages". `U`
+jumps to the parent; at depth 0 it goes to message 0, and at message 0 it
+says "Already at top". `R` shows a numbered list of loaded direct replies
+to jump to; at message 0 these are the top-level comments. `T` returns `Pop{Result: commentID}` so Thread Index
 re-selects this comment. Space and PgDn page long bodies. `O` opens link
 `[1]`; with several links it prompts for the number.
 
@@ -436,7 +457,7 @@ read through a 10 MB limit.
 | Posts | `GET /r/{sub}/{sort}?limit=100&after={after}` (`top` adds `t=day`) |
 | Thread | `GET /r/{sub}/comments/{id}?sort={apiSort}&limit=500&depth=10` |
 | Subtree | `GET /r/{sub}/comments/{id}?comment={commentID}&context=0&sort={apiSort}&limit=500&depth=10` |
-| MoreChildren | `GET /api/morechildren?link_id=t3_{id}&children={ids}&sort={apiSort}&api_type=json`, at most 100 IDs per call, never more than one call in flight |
+| MoreChildren | `GET /api/morechildren?link_id={linkFullname}&children={ids}&sort={apiSort}&api_type=json`, at most 100 IDs per call, never more than one call in flight. `children` is bare comment IDs joined by commas; `linkFullname` is normalised to exactly one `t3_` prefix |
 
 `apiSort` maps best to `confidence`; top and new are passed through.
 
@@ -450,8 +471,11 @@ Comments []*Comment}` tree.
 The MoreChildren response is `{"json": {"errors": [...], "data":
 {"things": [...]}}}`. Non-empty `errors` is an error. Things are flat and
 may include further `more` stubs; they are attached using `parent_id`,
-which is `t1_<id>` for a comment parent or `t3_<id>` for the post. Things
-whose parent is not loaded are dropped. Things whose ID is already loaded
+which is `t1_<id>` for a comment parent or `t3_<id>` for the post.
+Attachment is two-pass: index every returned thing by fullname first, then
+attach each to a parent that is either already loaded or in the response,
+so order within the response does not matter. Only things whose parent is
+in neither set are dropped. Things whose ID is already loaded
 are ignored. IDs that the response did not return remain in the stub so
 the row can be retried.
 
@@ -479,8 +503,9 @@ an entry. Cached values are never mutated after insertion.
   CreatedUTC, URL, Domain, Permalink, IsSelf, SelfText, Stickied, Over18,
   Distinguished.
 - `Comment`: ID, Fullname, ParentFullname, Author, Body, Score,
-  CreatedUTC, Depth, IsSubmitter, Distinguished, Deleted (author or body
-  is `[deleted]` or `[removed]`), Children `[]*Comment`, More `*MoreStub`.
+  CreatedUTC, Depth, IsSubmitter, Distinguished, AuthorDeleted (author is
+  `[deleted]`), BodyRemoved (body is `[deleted]` or `[removed]`), Children
+  `[]*Comment`, More `*MoreStub`.
 - `MoreStub`: ParentFullname, Count, IDs.
 - `Listing`: Posts, After (empty at the end).
 
@@ -493,7 +518,7 @@ an entry. Cached values are never mutated after insertion.
 | 403 | Status "Access denied" plus Reddit's `reason` field when present (private, quarantined, gated). Screen stays |
 | 404 | Status "No such area" on Post List; the screen stays so `J` can try again |
 | 429 | Wait per section 7.3, retry once, then show the error |
-| Malformed JSON | Status "Unexpected response from Reddit". With `--debug`, the first 64 KB of the body is written to `$XDG_STATE_HOME/redditbbs/last-error.json` |
+| Malformed JSON | Status "Unexpected response from Reddit". With `--debug`, the first 64 KB of the body is written to `$XDG_STATE_HOME/redditbbs/last-error.json` (directory 0700, file 0600) |
 | Browser opener missing or failing | Status line shows the URL so it can be copied |
 | Panic in a worker | Recovered in the worker, delivered as an error `Msg` |
 | Panic on the event loop | Deferred recover in `main` restores the terminal, prints the panic and stack to stderr, exits 1 |
@@ -502,8 +527,10 @@ an entry. Cached values are never mutated after insertion.
 Terminal cleanup runs from one place in `main` on every exit path.
 
 `browser.Open` accepts only `http` and `https` URLs, runs `xdg-open` on
-Linux and `open` on macOS as an argument array without a shell, does not
-wait for the process, and reports a launch failure.
+Linux and `open` on macOS as an argument array without a shell, returns
+after `Start` so the UI is not blocked, and reaps the process with `Wait`
+in a goroutine, reporting a non-zero exit through a callback that the
+status line shows.
 
 ## 9. Testing
 
