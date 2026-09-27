@@ -132,20 +132,31 @@ func run(args []string, stdout, stderr io.Writer) (code int) {
 		if len(cfg.Areas) == 0 {
 			cfg.Areas = append([]config.Area(nil), config.DefaultAreas...)
 		}
-		feeds := newFeedClient(cfg, func(d time.Duration) {
+		feeds, dir, diskErr := newFeedClient(cfg, func(d time.Duration) {
 			if app != nil {
 				app.Post(ui.RateLimited{Wait: d})
 			}
 		})
 		defer feeds.Close()
 		deps.Store = feeds
-		syncer := rss.NewSyncer(feeds, areaNames(cfg))
-		syncer.Sort = reddit.Sort(cfg.Display.DefaultSort)
-		syncCtx, stopSync := context.WithCancel(context.Background())
-		defer stopSync()
-		go syncer.Run(syncCtx)
-		deps.OnAreasChanged = func() { syncer.SetAreas(areaNames(cfg)) }
-		deps.CacheInfo = func() string { return cacheInfo(feeds.Stats()) }
+		note := ""
+		switch unlock, ok, err := rss.LockSync(dir); {
+		case diskErr != nil:
+			note = " (no disk cache: " + diskErr.Error() + ")"
+		case err != nil:
+			note = " (background sync off: " + err.Error() + ")"
+		case !ok:
+			note = " (another rdditbbs is syncing)"
+		default:
+			defer unlock()
+			syncer := rss.NewSyncer(feeds, areaNames(cfg))
+			syncer.Sort = reddit.Sort(cfg.Display.DefaultSort)
+			syncCtx, stopSync := context.WithCancel(context.Background())
+			defer stopSync()
+			go syncer.Run(syncCtx)
+			deps.OnAreasChanged = func() { syncer.SetAreas(areaNames(cfg)) }
+		}
+		deps.CacheInfo = func() string { return cacheInfo(feeds.Stats()) + note }
 	case "demo":
 		deps.Demo = true
 		deps.Store = redditest.NewDemoStore(time.Now)
@@ -186,16 +197,22 @@ func areaNames(cfg *config.Config) []string {
 	return names
 }
 
-// newFeedClient builds the RSS client with its disk store. Without a usable
-// cache directory it still works, from memory only.
-func newFeedClient(cfg *config.Config, onWait func(time.Duration)) *rss.Client {
+// newFeedClient builds the RSS client with its disk store and returns the
+// store's directory. Without a usable cache directory the client still
+// works, from memory only, and the directory is empty with an error.
+func newFeedClient(cfg *config.Config, onWait func(time.Duration)) (*rss.Client, string, error) {
 	c := rss.NewClient(cfg.Reddit.UserAgent, rss.WithBaseURL(feedBaseURL), rss.WithOnWait(onWait))
-	if dir, err := cacheDir(); err == nil {
-		if d, err := rss.NewDisk(filepath.Join(dir, "feeds")); err == nil {
-			c.UseDisk(d)
-		}
+	dir, err := cacheDir()
+	if err != nil {
+		return c, "", fmt.Errorf("no cache directory: %w", err)
 	}
-	return c
+	feeds := filepath.Join(dir, "feeds")
+	d, err := rss.NewDisk(feeds)
+	if err != nil {
+		return c, "", fmt.Errorf("cannot use cache directory %s: %w", feeds, err)
+	}
+	c.UseDisk(d)
+	return c, feeds, nil
 }
 
 func cacheInfo(st rss.DiskStats) string {
@@ -219,8 +236,22 @@ func runSync(cfg *config.Config, args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "rdditbbs: sync: no areas configured; add some with `rdditbbs import`")
 		return 2
 	}
-	feeds := newFeedClient(cfg, nil)
+	feeds, dir, err := newFeedClient(cfg, nil)
 	defer feeds.Close()
+	if err != nil {
+		fmt.Fprintln(stderr, "rdditbbs: sync:", err)
+		return 1
+	}
+	unlock, ok, err := rss.LockSync(dir)
+	if err != nil {
+		fmt.Fprintln(stderr, "rdditbbs: sync: cache lock:", err)
+		return 1
+	}
+	if !ok {
+		fmt.Fprintln(stdout, "Another rdditbbs is already syncing this cache; nothing to do.")
+		return 0
+	}
+	defer unlock()
 	syncer := rss.NewSyncer(feeds, areaNames(cfg))
 	syncer.Sort = reddit.Sort(cfg.Display.DefaultSort)
 	syncer.PerArea = *threads
@@ -230,10 +261,15 @@ func runSync(cfg *config.Config, args []string, stdout, stderr io.Writer) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if *once {
-		n, err := syncer.Sweep(ctx)
-		fmt.Fprintf(stdout, "%d feeds fetched. %s\n", n, cacheInfo(feeds.Stats()))
+		pruned := feeds.Prune()
+		res, err := syncer.Sweep(ctx)
+		fmt.Fprintf(stdout, "%d feeds fetched, %d failed, %d already fresh, %d old entries removed. %s\n",
+			res.Fetched, res.Failed, res.Skipped, pruned, cacheInfo(feeds.Stats()))
 		if err != nil && ctx.Err() == nil {
 			fmt.Fprintln(stderr, "rdditbbs: sync:", err)
+			return 1
+		}
+		if res.Failed > 0 {
 			return 1
 		}
 		return 0
@@ -251,10 +287,15 @@ var stdin io.Reader = os.Stdin
 func runImport(cfg *config.Config, args []string, stdout, stderr io.Writer) int {
 	text := strings.Join(args, " ")
 	if len(args) == 0 {
-		b, err := io.ReadAll(io.LimitReader(stdin, 1<<20))
+		const limit = 1 << 20
+		b, err := io.ReadAll(io.LimitReader(stdin, limit+1))
 		if err != nil {
 			fmt.Fprintln(stderr, "rdditbbs: import:", err)
 			return 1
+		}
+		if len(b) > limit {
+			fmt.Fprintln(stderr, "rdditbbs: import: input too large (over 1 MB); nothing was changed")
+			return 2
 		}
 		text = string(b)
 	}

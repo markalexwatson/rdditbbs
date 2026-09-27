@@ -215,7 +215,7 @@ r/this_name_is_far_too_long_for_reddit`
 	if strings.Join(names, ",") != strings.Join(want, ",") {
 		t.Errorf("names = %v\nwant    %v", names, want)
 	}
-	if strings.Join(invalid, ",") != "bad!name,x,this_name_is_far_too_long_for_reddit" {
+	if strings.Join(invalid, ",") != "bad!name,x,r/this_name_is_far_too_long_for_reddit" { // reported as pasted
 		t.Errorf("invalid = %v", invalid)
 	}
 }
@@ -226,5 +226,19 @@ func TestImportAreas(t *testing.T) {
 	added := c.ImportAreas([]string{"LINUX", "rust", "golang", "rust"})
 	if added != 2 || len(c.Areas) != 3 || c.Areas[1].Name != "rust" || c.Areas[1].Subreddit != "rust" {
 		t.Errorf("added %d areas %+v", added, c.Areas)
+	}
+}
+
+func TestParseSubredditNamesFromAddresses(t *testing.T) {
+	names, invalid := ParseSubredditNames(`https://www.reddit.com/r/linux/top/?t=day
+https://old.reddit.com/r/rust/comments/abc123/some_title/
+reddit.com/r/vim?utm=x
+https://example.com/r/evil
+https://www.reddit.com/user/someone`)
+	if strings.Join(names, ",") != "linux,rust,vim" {
+		t.Errorf("names = %v", names)
+	}
+	if len(invalid) != 2 {
+		t.Errorf("addresses on other sites, or without a subreddit, must be refused: %v", invalid)
 	}
 }

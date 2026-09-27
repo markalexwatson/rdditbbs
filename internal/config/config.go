@@ -174,14 +174,9 @@ func ParseSubredditNames(text string) (names, invalid []string) {
 	for _, tok := range strings.FieldsFunc(text, func(r rune) bool {
 		return r == ',' || r == '+' || r == ' ' || r == '\n' || r == '\t' || r == '\r'
 	}) {
-		name := tok
-		if i := strings.LastIndex(name, "/r/"); i >= 0 {
-			name = name[i+3:]
-		}
-		name = strings.TrimPrefix(name, "r/")
-		name = strings.Trim(name, "/")
-		if !subredditName.MatchString(name) {
-			invalid = append(invalid, name)
+		name, ok := subredditFromToken(tok)
+		if !ok || !subredditName.MatchString(name) {
+			invalid = append(invalid, tok)
 			continue
 		}
 		if key := strings.ToLower(name); !seen[key] {
@@ -190,6 +185,36 @@ func ParseSubredditNames(text string) (names, invalid []string) {
 		}
 	}
 	return names, invalid
+}
+
+// subredditFromToken extracts the subreddit from one pasted token: a bare
+// name, r/name, or an address on reddit.com whose path starts with /r/name.
+// Addresses on other sites are refused.
+func subredditFromToken(tok string) (string, bool) {
+	s := strings.TrimSpace(tok)
+	if i := strings.Index(s, "://"); i >= 0 {
+		s = s[i+3:]
+	}
+	if i := strings.IndexAny(s, "?#"); i >= 0 {
+		s = s[:i]
+	}
+	if slash := strings.Index(s, "/"); slash > 0 && strings.Contains(s[:slash], ".") {
+		host := strings.ToLower(s[:slash])
+		if host != "reddit.com" && !strings.HasSuffix(host, ".reddit.com") {
+			return "", false
+		}
+		s = s[slash:]
+	}
+	s = strings.TrimPrefix(s, "/")
+	if rest, ok := strings.CutPrefix(s, "r/"); ok {
+		s = rest
+	} else if strings.Contains(s, "/") {
+		return "", false // a path that is not /r/<name>
+	}
+	if i := strings.Index(s, "/"); i >= 0 {
+		s = s[:i]
+	}
+	return s, s != ""
 }
 
 // ImportAreas adds an area for each name not already configured and reports

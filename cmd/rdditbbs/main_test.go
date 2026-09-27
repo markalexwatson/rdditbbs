@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/markalexwatson/rdditbbs/internal/config"
+	"github.com/markalexwatson/rdditbbs/internal/rss"
 	"github.com/markalexwatson/rdditbbs/internal/term"
 	"github.com/markalexwatson/rdditbbs/internal/theme"
 )
@@ -208,7 +210,55 @@ func TestSyncOnceCommand(t *testing.T) {
 		t.Errorf("stdout = %q", out.String())
 	}
 	entries, _ := os.ReadDir(cache + "/feeds")
-	if len(entries) != 3 {
-		t.Errorf("cache should hold three feeds, has %d", len(entries))
+	feeds := 0
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".feed") {
+			feeds++
+		}
+	}
+	if feeds != 3 {
+		t.Errorf("cache should hold three feeds, has %d", feeds)
+	}
+}
+
+func TestImportRejectsOversizedInput(t *testing.T) {
+	path := t.TempDir() + "/config.toml"
+	defer func(r io.Reader) { stdin = r }(stdin)
+	stdin = strings.NewReader(strings.Repeat("r/linux ", 200000)) // about 1.6 MB
+	var out, errb bytes.Buffer
+	if code := run([]string{"--config", path, "import"}, &out, &errb); code != 2 || !strings.Contains(errb.String(), "too large") {
+		t.Errorf("code = %d stderr %q", code, errb.String())
+	}
+	if _, err := os.Stat(path); err == nil {
+		t.Error("nothing should be saved when the input is refused")
+	}
+}
+
+func TestSyncRefusesWhileAnotherSyncerRuns(t *testing.T) {
+	defer func(u string, c func() (string, error)) { feedBaseURL, cacheDir = u, c }(feedBaseURL, cacheDir)
+	feedBaseURL = "http://127.0.0.1:1" // must never be contacted
+	cache := t.TempDir()
+	cacheDir = func() (string, error) { return cache, nil }
+	unlock, ok, err := rss.LockSync(cache + "/feeds")
+	if err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	defer unlock()
+	path := t.TempDir() + "/config.toml"
+	writeFile(path, "[[areas]]\nname = \"Linux\"\nsubreddit = \"linux\"\n")
+	var out, errb bytes.Buffer
+	if code := run([]string{"--config", path, "sync", "--once"}, &out, &errb); code != 0 || !strings.Contains(out.String(), "already syncing") {
+		t.Errorf("code = %d stdout %q stderr %q", code, out.String(), errb.String())
+	}
+}
+
+func TestSyncNeedsACacheDirectory(t *testing.T) {
+	defer func(c func() (string, error)) { cacheDir = c }(cacheDir)
+	cacheDir = func() (string, error) { return "", errors.New("no home") }
+	path := t.TempDir() + "/config.toml"
+	writeFile(path, "[[areas]]\nname = \"Linux\"\nsubreddit = \"linux\"\n")
+	var out, errb bytes.Buffer
+	if code := run([]string{"--config", path, "sync", "--once"}, &out, &errb); code != 1 || !strings.Contains(errb.String(), "cache") {
+		t.Errorf("code = %d stderr %q", code, errb.String())
 	}
 }

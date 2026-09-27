@@ -195,6 +195,15 @@ func (c *Client) Stats() DiskStats {
 	return c.disk.Stats(c.now())
 }
 
+// Prune removes expired, unreadable and abandoned files from the disk store
+// and reports how many went; zero without a store.
+func (c *Client) Prune() int {
+	if c.disk == nil {
+		return 0
+	}
+	return c.disk.Prune(c.now(), maxAge)
+}
+
 // PendingRefresh is how many stale entries are waiting for the syncer.
 func (c *Client) PendingRefresh() int {
 	c.mu.Lock()
