@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/markalexwatson/redditbbs/internal/config"
-	"github.com/markalexwatson/redditbbs/internal/reddit"
 	"github.com/markalexwatson/redditbbs/internal/reddit/redditest"
 	"github.com/markalexwatson/redditbbs/internal/term"
 	"github.com/markalexwatson/redditbbs/internal/textfmt"
