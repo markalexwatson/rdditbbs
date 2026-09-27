@@ -111,7 +111,7 @@ func translate(e *tcell.EventKey, paste bool) (Key, bool) {
 		tcell.KeyDelete: KeyDelete, tcell.KeyTab: KeyTab,
 		tcell.KeyUp: KeyUp, tcell.KeyDown: KeyDown, tcell.KeyLeft: KeyLeft, tcell.KeyRight: KeyRight,
 		tcell.KeyPgUp: KeyPgUp, tcell.KeyPgDn: KeyPgDn, tcell.KeyHome: KeyHome, tcell.KeyEnd: KeyEnd,
-		tcell.KeyCtrlC: KeyCtrlC, tcell.KeyCtrlL: KeyCtrlL,
+		tcell.KeyCtrlC: KeyCtrlC, tcell.KeyCtrlL: KeyCtrlL, tcell.KeyCtrlT: KeyCtrlT,
 	}
 	if e.Key() == tcell.KeyRune {
 		return Key{Code: KeyRune, Rune: e.Rune(), Paste: paste}, true

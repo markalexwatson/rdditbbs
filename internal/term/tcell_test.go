@@ -35,6 +35,7 @@ func TestTranslateKeys(t *testing.T) {
 		{tcell.NewEventKey(tcell.KeyPgDn, 0, 0), K(KeyPgDn)},
 		{tcell.NewEventKey(tcell.KeyCtrlC, 0, 0), K(KeyCtrlC)},
 		{tcell.NewEventKey(tcell.KeyCtrlL, 0, 0), K(KeyCtrlL)},
+		{tcell.NewEventKey(tcell.KeyCtrlT, 0, 0), K(KeyCtrlT)},
 	}
 	for _, c := range cases {
 		got, ok := translate(c.ev, false)

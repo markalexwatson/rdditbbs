@@ -21,6 +21,7 @@ const (
 	KeyEnd
 	KeyCtrlC
 	KeyCtrlL
+	KeyCtrlT
 )
 
 // Key is a key press. Paste is true for runes delivered inside a bracketed paste.
