@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/markalexwatson/rdditbbs/internal/reddit"
@@ -20,10 +21,19 @@ const DefaultBaseURL = "https://www.reddit.com"
 const (
 	listingTTL   = 10 * time.Minute
 	threadTTL    = 15 * time.Minute
+	maxAge       = 24 * time.Hour  // older disk entries are not served
+	staleHold    = 2 * time.Minute // how long a stale disk entry is held in memory
 	cacheEntries = 200
 	maxBody      = 10 << 20
 	feedsPerMin  = 1 // Reddit's observed allowance for unauthenticated feeds
 )
+
+// job is one fetch the background syncer can perform.
+type job struct {
+	url      string
+	ttl      time.Duration
+	validate func([]byte) error
+}
 
 // Client reads Reddit's Atom feeds. It satisfies reddit.Store. Feeds allow
 // about one request a minute, so responses are cached, identical requests in
@@ -39,8 +49,13 @@ type Client struct {
 	sleep  func(context.Context, time.Duration) error
 	onWait func(time.Duration)
 
-	mu    sync.Mutex
-	calls map[string]*call // in-flight fetches by URL
+	mu      sync.Mutex
+	calls   map[string]*call // in-flight fetches by URL
+	refresh []job            // stale entries a reader opened, to refresh first
+	queued  map[string]bool
+
+	disk *Disk        // optional persistent store
+	fg   atomic.Int32 // foreground requests waiting for the allowance
 
 	bgCtx    context.Context
 	bgCancel context.CancelFunc
@@ -76,7 +91,7 @@ func WithOnWait(f func(time.Duration)) Option { return func(c *Client) { c.onWai
 
 // NewClient builds a feed client identified by userAgent.
 func NewClient(userAgent string, opts ...Option) *Client {
-	c := &Client{base: DefaultBaseURL, http: &http.Client{Timeout: 15 * time.Second}, ua: userAgent, now: time.Now, sleep: reddit.SleepContext, calls: map[string]*call{}}
+	c := &Client{base: DefaultBaseURL, http: &http.Client{Timeout: 15 * time.Second}, ua: userAgent, now: time.Now, sleep: reddit.SleepContext, calls: map[string]*call{}, queued: map[string]bool{}}
 	for _, o := range opts {
 		o(c)
 	}
@@ -89,6 +104,111 @@ func NewClient(userAgent string, opts ...Option) *Client {
 	c.cache = reddit.NewCache(cacheEntries, c.now)
 	c.bgCtx, c.bgCancel = context.WithCancel(context.Background())
 	return c
+}
+
+// UseDisk attaches a persistent store: fetched feeds are written to it and
+// reads are served from it, so nothing waits for the network if it is there.
+func (c *Client) UseDisk(d *Disk) { c.disk = d }
+
+// key is the disk key for a URL: the path and query, without the host.
+func (c *Client) key(u string) string { return strings.TrimPrefix(u, c.base) }
+
+// age reports how long ago u was fetched, according to the disk store.
+func (c *Client) age(u string) (time.Duration, bool) {
+	if c.disk == nil {
+		return 0, false
+	}
+	_, fetched, ok := c.disk.Get(c.key(u))
+	if !ok {
+		return 0, false
+	}
+	return c.now().Sub(fetched), true
+}
+
+// Cached reports whether a post's thread can be shown without the network.
+func (c *Client) Cached(sub, postID string) bool {
+	u := c.threadURL(sub, postID)
+	if _, ok := c.cache.Get(u); ok {
+		return true
+	}
+	age, ok := c.age(u)
+	return ok && age <= maxAge
+}
+
+// Stats summarises the disk store; zero without one.
+func (c *Client) Stats() DiskStats {
+	if c.disk == nil {
+		return DiskStats{}
+	}
+	return c.disk.Stats(c.now())
+}
+
+// PendingRefresh is how many stale entries are waiting for the syncer.
+func (c *Client) PendingRefresh() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.refresh)
+}
+
+func (c *Client) enqueue(j job) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.queued[j.url] {
+		c.queued[j.url] = true
+		c.refresh = append(c.refresh, j)
+	}
+}
+
+func (c *Client) popRefresh() (job, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.refresh) == 0 {
+		return job{}, false
+	}
+	j := c.refresh[0]
+	c.refresh = c.refresh[1:]
+	delete(c.queued, j.url)
+	return j, true
+}
+
+// fromDisk serves u from the persistent store when it is recent enough,
+// queuing a background refresh if it is past its freshness.
+func (c *Client) fromDisk(u string, ttl time.Duration, validate func([]byte) error) ([]byte, bool) {
+	if c.disk == nil {
+		return nil, false
+	}
+	b, fetched, ok := c.disk.Get(c.key(u))
+	if !ok {
+		return nil, false
+	}
+	age := c.now().Sub(fetched)
+	if age > maxAge || validate(b) != nil {
+		return nil, false
+	}
+	if age < ttl {
+		c.cache.Put(u, b, ttl-age)
+	} else {
+		c.cache.Put(u, b, staleHold)
+		c.enqueue(job{url: u, ttl: ttl, validate: validate})
+	}
+	return b, true
+}
+
+// runJob performs a background fetch using a reservation the caller already
+// holds. If the URL is already being fetched the reservation is returned.
+func (c *Client) runJob(ctx context.Context, j job) error {
+	c.mu.Lock()
+	if cl, busy := c.calls[j.url]; busy {
+		c.mu.Unlock()
+		c.gate.Unreserve()
+		_, err := cl.wait(ctx)
+		return err
+	}
+	cl := &call{done: make(chan struct{})}
+	c.calls[j.url] = cl
+	c.mu.Unlock()
+	c.run(ctx, j.url, cl, j.ttl, j.validate, true, true)
+	return cl.err
 }
 
 // Close cancels background prefetches and waits for them to stop.
@@ -181,6 +301,9 @@ func (c *Client) fetch(ctx context.Context, u string, fresh bool, ttl time.Durat
 		if b, ok := c.cache.Get(u); ok {
 			return b, nil
 		}
+		if b, ok := c.fromDisk(u, ttl, validate); ok {
+			return b, nil
+		}
 	}
 	c.mu.Lock()
 	if cl, ok := c.calls[u]; ok {
@@ -219,6 +342,9 @@ func (c *Client) run(ctx context.Context, u string, cl *call, ttl time.Duration,
 			err = &reddit.ParseError{Err: verr}
 		} else {
 			c.cache.Put(u, b, ttl)
+			if c.disk != nil {
+				_ = c.disk.Put(c.key(u), b, c.now()) // best effort: memory still has it
+			}
 		}
 	}
 	cl.b, cl.err = b, err
@@ -230,12 +356,11 @@ func (c *Client) do(ctx context.Context, u string, reserved, quiet bool) ([]byte
 	retried := reserved // prefetches never retry
 	for {
 		if !reserved {
-			if err := c.gate.Acquire(ctx); err != nil {
+			c.fg.Add(1)
+			err := c.gate.Acquire(ctx)
+			c.fg.Add(-1)
+			if err != nil {
 				return nil, err
-			}
-			if b, ok := c.cache.Get(u); ok { // filled while we waited
-				c.gate.Release(nil)
-				return b, nil
 			}
 		}
 		reserved = false

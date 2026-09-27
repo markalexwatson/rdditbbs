@@ -89,6 +89,29 @@ func (g *RateGate) Acquire(ctx context.Context) error {
 	}
 }
 
+// Unreserve gives back a reservation that was never used for a request.
+func (g *RateGate) Unreserve() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.inflight > 0 {
+		g.inflight--
+	}
+}
+
+// UntilReset is how long until the current window resets, or zero when no
+// window is known.
+func (g *RateGate) UntilReset() time.Duration {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.reset.IsZero() {
+		return 0
+	}
+	if d := g.reset.Sub(g.now()); d > 0 {
+		return d
+	}
+	return 0
+}
+
 // TryAcquire reserves a unit only if one is available now; it never waits.
 // Background prefetching uses it so it can never delay a user's request.
 func (g *RateGate) TryAcquire() bool {
