@@ -16,6 +16,7 @@ import (
 	"github.com/markalexwatson/redditbbs/internal/reddit"
 	"github.com/markalexwatson/redditbbs/internal/session"
 	"github.com/markalexwatson/redditbbs/internal/term"
+	"github.com/markalexwatson/redditbbs/internal/theme"
 	"github.com/markalexwatson/redditbbs/internal/ui"
 	"github.com/markalexwatson/redditbbs/internal/ui/screens"
 )
@@ -52,6 +53,10 @@ func run(args []string, stdout, stderr io.Writer) (code int) {
 	}
 	cfg, err := config.Load(path, os.Getenv)
 	if err != nil {
+		fmt.Fprintln(stderr, "redditbbs: config:", err)
+		return 2
+	}
+	if err := applyTheme(cfg); err != nil {
 		fmt.Fprintln(stderr, "redditbbs: config:", err)
 		return 2
 	}
@@ -95,7 +100,10 @@ func run(args []string, stdout, stderr io.Writer) (code int) {
 		deps.Store = deps.MakeStore(cfg.ClientID(), cfg.ClientSecret())
 	}
 
-	app = ui.New(t, screens.NewSplash(deps))
+	app = ui.New(t, screens.NewSplash(deps), ui.WithThemeHook(func(name string) {
+		cfg.Display.Theme = name
+		_ = cfg.Save() // best effort: the theme still applies for this session
+	}))
 	err = app.Run()
 	t.Fini()
 	if err != nil {
@@ -106,6 +114,31 @@ func run(args []string, stdout, stderr io.Writer) (code int) {
 }
 
 var badResponseMu sync.Mutex
+
+// applyTheme registers the [theme] table as the "custom" theme when it has
+// overrides, then activates the theme named in [display].
+func applyTheme(cfg *config.Config) error {
+	if cfg.HasCustomTheme() {
+		t, err := theme.Custom(cfg.Theme.Base, cfg.Theme.Overrides)
+		if err != nil {
+			return err
+		}
+		theme.Register(t)
+	} else {
+		theme.Unregister("custom") // no overrides: "custom" is not on offer
+	}
+	name := cfg.Display.Theme
+	if name == "" {
+		name = "classic"
+	}
+	if err := theme.Set(name); err != nil {
+		if name == "custom" {
+			return fmt.Errorf("display.theme is \"custom\" but the [theme] table defines no overrides")
+		}
+		return fmt.Errorf("display.theme: %v", err)
+	}
+	return nil
+}
 
 // saveBadResponse atomically writes body to
 // $XDG_STATE_HOME/redditbbs/last-error.json with mode 0600.
