@@ -3,6 +3,7 @@ package rss
 import (
 	"context"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -30,7 +31,8 @@ func paths(s *srv) []string {
 func TestSweepFetchesListingsThenThreads(t *testing.T) {
 	s := &srv{}
 	sy, c, _, slept := syncer(t, s, "linux")
-	n, err := sy.Sweep(context.Background())
+	res, err := sy.Sweep(context.Background())
+	n := res.Fetched
 	if err != nil || n != 3 {
 		t.Fatalf("sweep fetched %d err %v; requests %v", n, err, paths(s))
 	}
@@ -44,8 +46,8 @@ func TestSweepFetchesListingsThenThreads(t *testing.T) {
 	if !c.Cached("linux", "1wron16") || !c.Cached("linux", "1wrnx3z") || c.Cached("linux", "1wrn23t") {
 		t.Error("the first two threads should be cached and the third not")
 	}
-	if n, _ := sy.Sweep(context.Background()); n != 0 || s.count() != 3 {
-		t.Errorf("a second sweep straight away has nothing to do: fetched %d requests %d", n, s.count())
+	if res, _ := sy.Sweep(context.Background()); res.Fetched != 0 || s.count() != 3 {
+		t.Errorf("a second sweep straight away has nothing to do: fetched %d requests %d", res.Fetched, s.count())
 	}
 }
 
@@ -54,9 +56,9 @@ func TestSweepRefreshesStaleListings(t *testing.T) {
 	sy, _, clock, _ := syncer(t, s, "linux")
 	sy.Sweep(context.Background())
 	clock.Advance(20 * time.Minute) // listing is stale (10 min); threads are not (1 hour)
-	n, _ := sy.Sweep(context.Background())
-	if n != 1 || paths(s)[3] != "/r/linux/hot/.rss" {
-		t.Errorf("only the listing should refresh: fetched %d, requests %v", n, paths(s)[3:])
+	res, _ := sy.Sweep(context.Background())
+	if res.Fetched != 1 || paths(s)[3] != "/r/linux/hot/.rss" {
+		t.Errorf("only the listing should refresh: fetched %d, requests %v", res.Fetched, paths(s)[3:])
 	}
 }
 
@@ -76,16 +78,16 @@ func TestSweepTakesForegroundRefreshesFirst(t *testing.T) {
 func TestSweepYieldsWhileForegroundWaits(t *testing.T) {
 	s := &srv{}
 	sy, c, _, _ := syncer(t, s, "linux")
-	c.fg.Add(1) // a reader is waiting for the allowance
+	c.gate.AddWaiter(1) // a reader is waiting for the allowance
 	yielded := 0
 	orig := c.sleep
 	c.sleep = func(ctx context.Context, d time.Duration) error {
-		if c.fg.Load() > 0 {
+		if c.gate.Waiting() > 0 {
 			yielded++
 			if s.count() != 0 {
 				t.Error("the syncer must not fetch while a foreground request is waiting")
 			}
-			c.fg.Add(-1)
+			c.gate.AddWaiter(-1)
 		}
 		return orig(ctx, d)
 	}
@@ -105,9 +107,9 @@ func TestSweepSkipsFailuresAndStopsOnCancel(t *testing.T) {
 		return false
 	}
 	sy, c, _, _ := syncer(t, s, "linux")
-	n, err := sy.Sweep(context.Background())
-	if err != nil || n != 2 {
-		t.Errorf("a failing thread should be skipped, not retried: fetched %d err %v requests %v", n, err, paths(s))
+	res, err := sy.Sweep(context.Background())
+	if err != nil || res.Fetched != 2 || res.Failed != 1 {
+		t.Errorf("a failing thread should be skipped, not retried: %+v err %v requests %v", res, err, paths(s))
 	}
 	if c.Cached("linux", "1wron16") {
 		t.Error("the failed thread must not be cached")
@@ -129,4 +131,57 @@ func TestSetAreas(t *testing.T) {
 	if got := paths(s); len(got) != 2 || got[0] != "/r/rust/hot/.rss" || got[1] != "/r/vim/hot/.rss" {
 		t.Errorf("requests = %v", got)
 	}
+}
+
+func TestSweepIsFiniteEvenWhenListingsExpireDuringIt(t *testing.T) {
+	s := &srv{}
+	areas := []string{"a1", "a2", "a3", "a4", "a5", "a6", "a7", "a8", "a9", "b1", "b2", "b3", "b4", "b5"}
+	sy, _, _, _ := syncer(t, s, areas...)
+	sy.PerArea = 0
+	res, err := sy.Sweep(context.Background()) // 14 fetches at ~50s each: the first listings go stale before the last is fetched
+	if err != nil || res.Fetched != len(areas) || s.count() != len(areas) {
+		t.Errorf("each feed should be attempted once per sweep: %+v err %v requests %d", res, err, s.count())
+	}
+}
+
+func TestSweepSkipsWorkDoneWhileItWaited(t *testing.T) {
+	s := &srv{}
+	sy, c, clock, _ := syncer(t, s, "linux")
+	sy.PerArea = 0
+	c.Posts(context.Background(), "rust", "hot", "", struct{ Fresh bool }{}) // spends the allowance: the syncer must wait
+	orig := c.sleep
+	done := false
+	c.sleep = func(ctx context.Context, d time.Duration) error {
+		if !done { // while the syncer waits, something else fetches the same listing
+			done = true
+			raw, _ := os.ReadFile("testdata/listing.xml")
+			c.disk.Put(c.key(c.listingURL("linux", "hot", "")), raw, clock.Now())
+		}
+		return orig(ctx, d)
+	}
+	res, err := sy.Sweep(context.Background())
+	if err != nil || res.Fetched != 0 || res.Skipped != 1 || s.count() != 1 {
+		t.Errorf("the listing was already refreshed: %+v err %v requests %v", res, err, paths(s))
+	}
+	clock.Advance(2 * time.Minute)
+	if !c.gate.TryAcquire() {
+		t.Error("the unused reservation should have been returned")
+	}
+}
+
+func TestSyncLockIsExclusive(t *testing.T) {
+	dir := t.TempDir()
+	unlock, ok, err := LockSync(dir)
+	if err != nil || !ok {
+		t.Fatalf("first lock: ok %v err %v", ok, err)
+	}
+	if _, ok2, _ := LockSync(dir); ok2 {
+		t.Error("a second syncer must not get the lock")
+	}
+	unlock()
+	unlock2, ok3, _ := LockSync(dir)
+	if !ok3 {
+		t.Error("the lock should be free after release")
+	}
+	unlock2()
 }

@@ -86,3 +86,23 @@ func TestFreshBypassesDisk(t *testing.T) {
 		t.Errorf("Fresh must go to the network, requests = %d", s.count())
 	}
 }
+
+func TestRateWindowIsSharedBetweenProcesses(t *testing.T) {
+	dir := t.TempDir()
+	d1, _ := NewDisk(dir)
+	d2, _ := NewDisk(dir)
+	s1, s2 := &srv{}, &srv{}
+	c1, clock1, _ := clientWithDisk(t, s1, d1)
+	c2, clock2, slept2 := clientWithDisk(t, s2, d2) // stands in for a separate process with its own gate
+	clock2.t = clock1.t
+	ctx := context.Background()
+	if _, err := c1.Posts(ctx, "linux", reddit.Hot, "", reddit.Fetch{}); err != nil { // server says: nothing left for 50s
+		t.Fatal(err)
+	}
+	if _, err := c2.Posts(ctx, "rust", reddit.Hot, "", reddit.Fetch{}); err != nil {
+		t.Fatal(err)
+	}
+	if len(*slept2) != 1 || (*slept2)[0] != 50*time.Second {
+		t.Errorf("the second process should wait out the window the first one used, slept %v", *slept2)
+	}
+}

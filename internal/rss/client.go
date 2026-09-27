@@ -3,13 +3,15 @@ package rss
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/markalexwatson/rdditbbs/internal/reddit"
@@ -33,6 +35,14 @@ type job struct {
 	url      string
 	ttl      time.Duration
 	validate func([]byte) error
+	dueAfter time.Duration // the job is due while the entry is missing or older than this
+}
+
+// rateState is the feed window shared between processes through a file in
+// the cache directory, since Reddit counts requests per address.
+type rateState struct {
+	Reset     int64   `json:"reset"` // Unix seconds
+	Remaining float64 `json:"remaining"`
 }
 
 // Client reads Reddit's Atom feeds. It satisfies reddit.Store. Feeds allow
@@ -54,8 +64,8 @@ type Client struct {
 	refresh []job            // stale entries a reader opened, to refresh first
 	queued  map[string]bool
 
-	disk *Disk        // optional persistent store
-	fg   atomic.Int32 // foreground requests waiting for the allowance
+	disk     *Disk  // optional persistent store
+	rateFile string // shared rate window, beside the disk store
 
 	bgCtx    context.Context
 	bgCancel context.CancelFunc
@@ -108,7 +118,49 @@ func NewClient(userAgent string, opts ...Option) *Client {
 
 // UseDisk attaches a persistent store: fetched feeds are written to it and
 // reads are served from it, so nothing waits for the network if it is there.
-func (c *Client) UseDisk(d *Disk) { c.disk = d }
+func (c *Client) UseDisk(d *Disk) {
+	c.disk = d
+	c.rateFile = filepath.Join(d.dir, "rate.json")
+}
+
+// loadRate applies a window another process recorded, if it is still open.
+func (c *Client) loadRate() {
+	if c.rateFile == "" {
+		return
+	}
+	b, err := os.ReadFile(c.rateFile)
+	if err != nil {
+		return
+	}
+	var st rateState
+	if json.Unmarshal(b, &st) != nil || st.Remaining >= 1 {
+		return
+	}
+	reset := time.Unix(st.Reset, 0)
+	if reset.Sub(c.now()) > 10*time.Minute { // implausible: ignore rather than stall
+		return
+	}
+	c.gate.BlockUntil(reset)
+}
+
+// saveRate records the window after a response, for other processes.
+func (c *Client) saveRate() {
+	if c.rateFile == "" {
+		return
+	}
+	remaining, reset := c.gate.State()
+	if reset.IsZero() {
+		return
+	}
+	b, err := json.Marshal(rateState{Reset: reset.Unix(), Remaining: remaining})
+	if err != nil {
+		return
+	}
+	tmp := c.rateFile + ".tmp"
+	if os.WriteFile(tmp, b, 0o600) == nil {
+		_ = os.Rename(tmp, c.rateFile)
+	}
+}
 
 // key is the disk key for a URL: the path and query, without the host.
 func (c *Client) key(u string) string { return strings.TrimPrefix(u, c.base) }
@@ -193,7 +245,7 @@ func (c *Client) fromDisk(u string, ttl time.Duration, validate func([]byte) err
 			hold = left // never keep an entry in memory past its maximum age
 		}
 		c.cache.Put(u, b, hold)
-		c.enqueue(job{url: u, ttl: ttl, validate: validate})
+		c.enqueue(job{url: u, ttl: ttl, validate: validate, dueAfter: ttl})
 	}
 	return b, true
 }
@@ -283,7 +335,8 @@ func (c *Client) Prefetch(_ context.Context, sub, postID string) bool {
 		c.mu.Unlock()
 		return true
 	}
-	if !c.gate.TryAcquire() {
+	c.loadRate()
+	if !c.gate.TryAcquireIdle() {
 		c.mu.Unlock()
 		return false
 	}
@@ -360,10 +413,8 @@ func (c *Client) do(ctx context.Context, u string, reserved, quiet bool) ([]byte
 	retried := reserved // prefetches never retry
 	for {
 		if !reserved {
-			c.fg.Add(1)
-			err := c.gate.Acquire(ctx)
-			c.fg.Add(-1)
-			if err != nil {
+			c.loadRate()
+			if err := c.gate.Acquire(ctx); err != nil {
 				return nil, err
 			}
 		}
@@ -383,6 +434,7 @@ func (c *Client) do(ctx context.Context, u string, reserved, quiet bool) ([]byte
 		body, readErr := io.ReadAll(io.LimitReader(resp.Body, maxBody+1))
 		resp.Body.Close()
 		c.gate.Release(resp.Header)
+		c.saveRate()
 		if readErr == nil && len(body) > maxBody {
 			readErr = fmt.Errorf("feed larger than %d bytes", maxBody)
 		}
