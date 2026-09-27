@@ -30,8 +30,8 @@ type App struct {
 	w, h       int
 	minW, minH int
 	quit       bool
-	notice     string            // shown on the prompt line until the next key
-	onTheme    func(name string) // called after Ctrl-T switches theme
+	notice     string                  // shown on the prompt line until the next key
+	onTheme    func(name string) error // called after Ctrl-T switches theme; an error is shown, not fatal
 }
 
 // Option configures App.
@@ -41,8 +41,9 @@ type Option func(*App)
 func WithMinSize(w, h int) Option { return func(a *App) { a.minW, a.minH = w, h } }
 
 // WithThemeHook sets a callback run with the new theme's name after Ctrl-T,
-// so the caller can persist the choice.
-func WithThemeHook(f func(name string)) Option { return func(a *App) { a.onTheme = f } }
+// so the caller can persist the choice. A returned error is reported on the
+// prompt line; the theme stays applied for the session either way.
+func WithThemeHook(f func(name string) error) Option { return func(a *App) { a.onTheme = f } }
 
 // New creates an App with root as the first screen and runs its Init.
 func New(t term.Terminal, root Screen, opts ...Option) *App {
@@ -166,7 +167,9 @@ func (a *App) handleKey(k term.Key) {
 		name := theme.Next()
 		a.notice = "Theme: " + name
 		if a.onTheme != nil {
-			a.onTheme(name)
+			if err := a.onTheme(name); err != nil {
+				a.notice = "Theme: " + name + " (not saved: " + err.Error() + ")"
+			}
 		}
 	default:
 		a.apply(top, top.screen.HandleKey(k))

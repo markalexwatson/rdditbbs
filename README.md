@@ -22,7 +22,8 @@ simulated terminal with sample data; `make screenshots` regenerates them.
 
 Four themes are built in, all within the 16 ANSI colours so they work in
 any terminal and follow your terminal's own palette. `Ctrl-T` cycles them
-on any screen and remembers the choice.
+on any screen (except while you are typing into a field) and remembers the
+choice.
 
 | `classic` | `blue` |
 | --- | --- |

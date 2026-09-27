@@ -73,6 +73,15 @@ func TestRunRejectsBadThemeOverride(t *testing.T) {
 	}
 }
 
+func TestApplyThemeRejectsBadBaseWithoutOverrides(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Display.Theme = "classic"
+	cfg.Theme = config.ThemeSettings{Base: "nope"}
+	if err := applyTheme(cfg); err == nil || !strings.Contains(err.Error(), "nope") {
+		t.Errorf("an unknown base should fail even with no overrides, got %v", err)
+	}
+}
+
 func TestApplyThemeRegistersCustomAndSelects(t *testing.T) {
 	t.Cleanup(func() { theme.Unregister("custom"); _ = theme.Set("classic") })
 	cfg := &config.Config{}

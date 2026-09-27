@@ -359,7 +359,7 @@ func TestCtrlTCyclesThemeAndNotifies(t *testing.T) {
 	root := &stub{name: "root"}
 	var saved []string
 	sim := term.NewSim(80, 24)
-	app := New(sim, root, WithThemeHook(func(name string) { saved = append(saved, name) }))
+	app := New(sim, root, WithThemeHook(func(name string) error { saved = append(saved, name); return nil }))
 	app.Handle(term.K(term.KeyCtrlT))
 	if theme.Current() != "blue" || len(saved) != 1 || saved[0] != "blue" {
 		t.Errorf("theme = %q saved = %v", theme.Current(), saved)
@@ -375,6 +375,18 @@ func TestCtrlTCyclesThemeAndNotifies(t *testing.T) {
 	app.Draw()
 	if strings.Contains(sim.Row(23), "Theme: blue") {
 		t.Error("the notice should clear on the next key")
+	}
+}
+
+func TestCtrlTReportsSaveFailure(t *testing.T) {
+	t.Cleanup(func() { _ = theme.Set("classic") })
+	_ = theme.Set("classic")
+	sim := term.NewSim(80, 24)
+	app := New(sim, &stub{name: "root"}, WithThemeHook(func(string) error { return errors.New("disk full") }))
+	app.Handle(term.K(term.KeyCtrlT))
+	app.Draw()
+	if row := sim.Row(23); !strings.Contains(row, "not saved") || !strings.Contains(row, "blue") {
+		t.Errorf("notice should say the theme applied but was not saved, got %q", row)
 	}
 }
 

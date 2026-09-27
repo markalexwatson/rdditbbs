@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	rdebug "runtime/debug"
+	"strings"
 	"sync"
 	"time"
 
@@ -100,9 +101,9 @@ func run(args []string, stdout, stderr io.Writer) (code int) {
 		deps.Store = deps.MakeStore(cfg.ClientID(), cfg.ClientSecret())
 	}
 
-	app = ui.New(t, screens.NewSplash(deps), ui.WithThemeHook(func(name string) {
+	app = ui.New(t, screens.NewSplash(deps), ui.WithThemeHook(func(name string) error {
 		cfg.Display.Theme = name
-		_ = cfg.Save() // best effort: the theme still applies for this session
+		return cfg.Save() // the theme still applies for this session if this fails
 	}))
 	err = app.Run()
 	t.Fini()
@@ -118,6 +119,11 @@ var badResponseMu sync.Mutex
 // applyTheme registers the [theme] table as the "custom" theme when it has
 // overrides, then activates the theme named in [display].
 func applyTheme(cfg *config.Config) error {
+	if base := cfg.Theme.Base; base != "" {
+		if _, ok := theme.Get(base); !ok {
+			return fmt.Errorf("theme.base: unknown theme %q (available: %s)", base, strings.Join(theme.Names(), ", "))
+		}
+	}
 	if cfg.HasCustomTheme() {
 		t, err := theme.Custom(cfg.Theme.Base, cfg.Theme.Overrides)
 		if err != nil {

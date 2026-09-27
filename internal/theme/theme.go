@@ -257,13 +257,17 @@ func Style(r Role) term.Style {
 }
 
 // OnBar returns a role's style drawn over the Bar fill: the role's foreground
-// and attributes with the bar's background when the role has none of its own.
+// and attributes with the bar's effective background (its foreground when the
+// bar is reversed) when the role has no background of its own.
 func OnBar(r Role) term.Style {
 	mu.RLock()
 	defer mu.RUnlock()
 	st, bar := active.Styles[r], active.Styles[Bar]
 	if st.BG == term.Default {
 		st.BG = bar.BG
+		if bar.Reverse {
+			st.BG = bar.FG
+		}
 	}
 	return st
 }
@@ -289,8 +293,10 @@ func ColourNames() []string {
 }
 
 // ParseStyle reads "<fg> [on <bg>] [bold] [reverse]" using the 16 ANSI colour
-// names (with "bright" prefixes, and "grey"/"gray" for bright black). Either
-// colour may be omitted; "default" means the terminal's own.
+// names (with "bright" prefixes, and "grey"/"gray" for bright black).
+// "default" means the terminal's own colour. The foreground may be omitted
+// only when no background is given ("bold" alone is valid); a background
+// always needs a foreground before "on". Attributes may follow either colour.
 func ParseStyle(s string) (term.Style, error) {
 	words := strings.Fields(strings.ToLower(s))
 	if len(words) == 0 {

@@ -134,6 +134,25 @@ func TestCustomOverridesBase(t *testing.T) {
 	}
 }
 
+func TestOnBarUsesEffectiveBackground(t *testing.T) {
+	t.Cleanup(func() { Unregister("custom"); _ = Set("classic") })
+	th, err := Custom("classic", map[string]string{"bar": "white on blue reverse", "subject": "bright yellow"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	Register(th)
+	_ = Set("custom")
+	got := OnBar(Subject)
+	if got.BG != term.White || got.Reverse {
+		t.Errorf("text on a reversed bar should take the bar's effective (white) background without reverse, got %+v", got)
+	}
+	th2, _ := Custom("classic", map[string]string{"bar": "white on blue", "cursor": "black on cyan"})
+	Register(th2)
+	if got := OnBar(Cursor); got.BG != term.Cyan {
+		t.Errorf("a role with its own background keeps it, got %+v", got)
+	}
+}
+
 func TestRegisterCustomAppearsInNames(t *testing.T) {
 	t.Cleanup(func() { Unregister("custom"); _ = Set("classic") })
 	th, _ := Custom("green", map[string]string{"heading": "white"})
