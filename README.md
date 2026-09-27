@@ -100,7 +100,9 @@ doubt. What changes:
 ### Stocking the cache without the interface
 
 `rdditbbs sync` runs the same background fetching on its own, so the board
-is full before you sit down. `--once` does a single sweep and exits, which
+is full before you sit down. Only one syncer stocks a cache at a time: if
+the program is open and syncing, a timer-run `sync` exits at once, and the
+two share the feed window so neither spends the other's request. `--once` does a single sweep and exits, which
 suits a timer; `--threads N` sets how many threads to keep per area
 (default 10). A user-level systemd timer, for example:
 
@@ -135,7 +137,8 @@ rdditbbs import
 It accepts names, `r/name`, full addresses and `a+b+c` lists, from
 arguments or standard input, skips what is already there, and reports
 anything that is not a valid subreddit name. Inside the program, `J` joins
-any subreddit and `A` adds it to the list.
+any subreddit and `A` adds it to the list. Run `import` while the program
+is closed: both write the whole config file, so the later save wins.
 
 ## Keys
 
