@@ -25,3 +25,15 @@ func TestSplashGoesToSetupWithoutCredentials(t *testing.T) {
 		t.Errorf("expected Setup, got %T", app.Top())
 	}
 }
+
+func TestSplashDemoModeSkipsSetup(t *testing.T) {
+	d, _ := newDeps(t)
+	d.Config.SetCredentials("", "")
+	d.Demo = true
+	app, sim := run(t, NewSplash(d))
+	mustContain(t, sim, "DEMO MODE")
+	press(app, term.K(term.KeyEnter))
+	if _, ok := app.Top().(*MainMenu); !ok {
+		t.Errorf("demo mode should go straight to the menu, got %T", app.Top())
+	}
+}

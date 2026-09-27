@@ -26,6 +26,7 @@ type Deps struct {
 	Open      func(url string, onExit func(error)) error
 	Now       func() time.Time
 	Version   string
+	Demo      bool // sample data, no credentials: skip setup and say so on the splash
 }
 
 // SelectComment is the Pop result Message Reader hands back to Thread Index.

@@ -15,6 +15,7 @@ import (
 	"github.com/markalexwatson/redditbbs/internal/browser"
 	"github.com/markalexwatson/redditbbs/internal/config"
 	"github.com/markalexwatson/redditbbs/internal/reddit"
+	"github.com/markalexwatson/redditbbs/internal/reddit/redditest"
 	"github.com/markalexwatson/redditbbs/internal/session"
 	"github.com/markalexwatson/redditbbs/internal/term"
 	"github.com/markalexwatson/redditbbs/internal/theme"
@@ -35,6 +36,7 @@ func run(args []string, stdout, stderr io.Writer) (code int) {
 	cfgPath := fs.String("config", "", "path to config.toml")
 	debugFlag := fs.Bool("debug", false, "save the last unparseable Reddit response to the state directory")
 	showVersion := fs.Bool("version", false, "print the version and exit")
+	demo := fs.Bool("demo", false, "browse built-in sample data without Reddit credentials")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -99,6 +101,13 @@ func run(args []string, stdout, stderr io.Writer) (code int) {
 	}
 	if cfg.HasCredentials() {
 		deps.Store = deps.MakeStore(cfg.ClientID(), cfg.ClientSecret())
+	}
+	if *demo {
+		deps.Demo = true
+		deps.Store = redditest.NewDemoStore(time.Now)
+		if len(cfg.Areas) == 0 {
+			cfg.Areas = append([]config.Area(nil), config.DefaultAreas...)
+		}
 	}
 
 	app = ui.New(t, screens.NewSplash(deps), ui.WithThemeHook(func(name string) error {

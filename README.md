@@ -70,6 +70,9 @@ the key that caused it.
    and secret, checks them against Reddit, and saves them to
    `~/.config/redditbbs/config.toml` with mode 0600.
 
+No credentials yet? `./bin/redditbbs --demo` runs the whole interface
+against built-in sample data so you can try every screen and theme.
+
 `REDDITBBS_CLIENT_ID` and `REDDITBBS_CLIENT_SECRET` override the file and
 are never written to disk. `--config PATH` uses another file. `--debug`
 saves the last unparseable API response to
