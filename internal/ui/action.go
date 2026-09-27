@@ -7,8 +7,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/markalexwatson/redditbbs/internal/term"
-	"github.com/markalexwatson/redditbbs/internal/ui/widgets"
+	"github.com/markalexwatson/rdditbbs/internal/term"
+	"github.com/markalexwatson/rdditbbs/internal/ui/widgets"
 )
 
 // Msg is anything delivered to a screen's Update.

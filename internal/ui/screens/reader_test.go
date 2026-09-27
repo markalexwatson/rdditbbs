@@ -4,11 +4,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/markalexwatson/redditbbs/internal/reddit"
-	"github.com/markalexwatson/redditbbs/internal/reddit/redditest"
-	"github.com/markalexwatson/redditbbs/internal/term"
-	"github.com/markalexwatson/redditbbs/internal/ui"
-	"github.com/markalexwatson/redditbbs/internal/ui/threadmodel"
+	"github.com/markalexwatson/rdditbbs/internal/reddit"
+	"github.com/markalexwatson/rdditbbs/internal/reddit/redditest"
+	"github.com/markalexwatson/rdditbbs/internal/term"
+	"github.com/markalexwatson/rdditbbs/internal/ui"
+	"github.com/markalexwatson/rdditbbs/internal/ui/threadmodel"
 )
 
 func readerAt(t *testing.T, id string) (*ui.App, *term.Sim, *Deps, *Reader) {

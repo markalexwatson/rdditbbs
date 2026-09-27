@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/markalexwatson/redditbbs/internal/term"
+	"github.com/markalexwatson/rdditbbs/internal/term"
 )
 
 func TestSchemeA(t *testing.T) {

@@ -5,12 +5,12 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/markalexwatson/redditbbs/internal/config"
-	"github.com/markalexwatson/redditbbs/internal/reddit"
-	"github.com/markalexwatson/redditbbs/internal/term"
-	"github.com/markalexwatson/redditbbs/internal/theme"
-	"github.com/markalexwatson/redditbbs/internal/ui"
-	"github.com/markalexwatson/redditbbs/internal/ui/widgets"
+	"github.com/markalexwatson/rdditbbs/internal/config"
+	"github.com/markalexwatson/rdditbbs/internal/reddit"
+	"github.com/markalexwatson/rdditbbs/internal/term"
+	"github.com/markalexwatson/rdditbbs/internal/theme"
+	"github.com/markalexwatson/rdditbbs/internal/ui"
+	"github.com/markalexwatson/rdditbbs/internal/ui/widgets"
 )
 
 var errNoStoreFactory = errors.New("no store factory configured")
@@ -66,7 +66,7 @@ func (s *Setup) Prompt() widgets.Prompt {
 }
 
 var setupText = []string{
-	"Welcome, new user! RedditBBS reads Reddit through its official API,",
+	"Welcome, new user! rdditbbs reads Reddit through its official API,",
 	"which needs a free 'script' app registered to your Reddit account.",
 	"",
 	"  1. Visit https://www.reddit.com/prefs/apps and choose 'create app'.",

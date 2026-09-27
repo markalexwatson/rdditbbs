@@ -3,9 +3,9 @@
 package widgets
 
 import (
-	"github.com/markalexwatson/redditbbs/internal/term"
-	"github.com/markalexwatson/redditbbs/internal/textfmt"
-	"github.com/markalexwatson/redditbbs/internal/theme"
+	"github.com/markalexwatson/rdditbbs/internal/term"
+	"github.com/markalexwatson/rdditbbs/internal/textfmt"
+	"github.com/markalexwatson/rdditbbs/internal/theme"
 )
 
 // Chrome heights.
@@ -30,7 +30,7 @@ type Prompt struct {
 	CursorPos int  // rune offset of the cursor in Input; 0 with Cursor set means the end
 }
 
-const logo = "R E D D I T   B B S"
+const logo = "R D D I T   B B S"
 
 // TitleBar draws the three-row framed title at the top of c.
 func TitleBar(c term.Canvas, title, info string) {

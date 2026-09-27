@@ -13,7 +13,7 @@ import (
 )
 
 // DefaultUserAgent identifies the client to Reddit when the user has not set one.
-const DefaultUserAgent = "linux:redditbbs:0.1.0 (by /u/redditbbs)"
+const DefaultUserAgent = "linux:rdditbbs:0.1.0 (by /u/rdditbbs)"
 
 // Area is a named subreddit shown in the Area List.
 type Area struct {
@@ -61,17 +61,17 @@ type Config struct {
 	envID, envSecret string
 }
 
-// DefaultPath is $XDG_CONFIG_HOME/redditbbs/config.toml or the OS equivalent.
+// DefaultPath is $XDG_CONFIG_HOME/rdditbbs/config.toml or the OS equivalent.
 func DefaultPath() (string, error) {
 	dir, err := os.UserConfigDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, "redditbbs", "config.toml"), nil
+	return filepath.Join(dir, "rdditbbs", "config.toml"), nil
 }
 
 // Load reads path if it exists, applies defaults, then overlays
-// REDDITBBS_CLIENT_ID and REDDITBBS_CLIENT_SECRET from getenv.
+// RDDITBBS_CLIENT_ID and RDDITBBS_CLIENT_SECRET from getenv.
 func Load(path string, getenv func(string) string) (*Config, error) {
 	c := &Config{Path: path}
 	c.Display.PeekPane = true
@@ -104,8 +104,8 @@ func Load(path string, getenv func(string) string) (*Config, error) {
 		}
 		c.Theme.Overrides[k] = v
 	}
-	c.envID = getenv("REDDITBBS_CLIENT_ID")
-	c.envSecret = getenv("REDDITBBS_CLIENT_SECRET")
+	c.envID = getenv("RDDITBBS_CLIENT_ID")
+	c.envSecret = getenv("RDDITBBS_CLIENT_SECRET")
 	return c, nil
 }
 

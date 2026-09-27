@@ -3,9 +3,9 @@ package widgets
 import (
 	"testing"
 
-	"github.com/markalexwatson/redditbbs/internal/term"
-	"github.com/markalexwatson/redditbbs/internal/textfmt"
-	"github.com/markalexwatson/redditbbs/internal/theme"
+	"github.com/markalexwatson/rdditbbs/internal/term"
+	"github.com/markalexwatson/rdditbbs/internal/textfmt"
+	"github.com/markalexwatson/rdditbbs/internal/theme"
 )
 
 func TestTextBoxDrawAndScroll(t *testing.T) {

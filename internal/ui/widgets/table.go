@@ -1,6 +1,6 @@
 package widgets
 
-import "github.com/markalexwatson/redditbbs/internal/term"
+import "github.com/markalexwatson/rdditbbs/internal/term"
 
 // Table tracks a cursor over count rows shown height at a time, keeping the
 // cursor visible.

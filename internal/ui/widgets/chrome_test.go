@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/markalexwatson/redditbbs/internal/term"
-	"github.com/markalexwatson/redditbbs/internal/theme"
+	"github.com/markalexwatson/rdditbbs/internal/term"
+	"github.com/markalexwatson/rdditbbs/internal/theme"
 )
 
 func TestTitleBar(t *testing.T) {
@@ -15,7 +15,7 @@ func TestTitleBar(t *testing.T) {
 	if !strings.HasPrefix(rows[0], "╔═") || !strings.HasSuffix(rows[0], "═╗") {
 		t.Errorf("top frame = %q", rows[0])
 	}
-	if !strings.Contains(rows[1], "R E D D I T   B B S") || !strings.Contains(rows[1], "Message Areas") || !strings.HasSuffix(rows[1], "r/linux 26/09/26 ║") {
+	if !strings.Contains(rows[1], "R D D I T   B B S") || !strings.Contains(rows[1], "Message Areas") || !strings.HasSuffix(rows[1], "r/linux 26/09/26 ║") {
 		t.Errorf("title row = %q", rows[1])
 	}
 	if !strings.HasPrefix(rows[2], "╚═") || !strings.HasSuffix(rows[2], "═╝") {

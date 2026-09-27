@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/markalexwatson/redditbbs/internal/term"
-	"github.com/markalexwatson/redditbbs/internal/theme"
-	"github.com/markalexwatson/redditbbs/internal/ui"
-	"github.com/markalexwatson/redditbbs/internal/ui/widgets"
+	"github.com/markalexwatson/rdditbbs/internal/term"
+	"github.com/markalexwatson/rdditbbs/internal/theme"
+	"github.com/markalexwatson/rdditbbs/internal/ui"
+	"github.com/markalexwatson/rdditbbs/internal/ui/widgets"
 )
 
 const goodbyeTick = 1
@@ -44,7 +44,7 @@ func (g *Goodbye) Draw(c term.Canvas) {
 		y = 0
 	}
 	widgets.Centre(c, y, "╒═══════════════════════════════════════╕", theme.Style(theme.Frame))
-	widgets.Centre(c, y+1, "Thanks for calling RedditBBS", theme.Style(theme.Logo))
+	widgets.Centre(c, y+1, "Thanks for calling rdditbbs", theme.Style(theme.Logo))
 	widgets.Centre(c, y+2, "╘═══════════════════════════════════════╛", theme.Style(theme.Frame))
 	stats := []string{
 		fmt.Sprintf("Time online ....... %s", fmtDuration(online)),

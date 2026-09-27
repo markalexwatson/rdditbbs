@@ -51,7 +51,7 @@ subreddit = "linux"
 func TestEnvOverridesFile(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "config.toml")
 	os.WriteFile(p, []byte("[reddit]\nclient_id = \"fileid\"\nclient_secret = \"filesecret\"\n"), 0o600)
-	env := map[string]string{"REDDITBBS_CLIENT_ID": "envid"}
+	env := map[string]string{"RDDITBBS_CLIENT_ID": "envid"}
 	c, _ := Load(p, func(k string) string { return env[k] })
 	if c.ClientID() != "envid" || c.ClientSecret() != "filesecret" {
 		t.Errorf("creds = %q %q", c.ClientID(), c.ClientSecret())
@@ -100,7 +100,7 @@ func TestSaveRoundTripAndMode(t *testing.T) {
 func TestEnvOnlyCredentialsNotSaved(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "config.toml")
 	os.WriteFile(p, []byte("[[areas]]\nname = \"Linux\"\nsubreddit = \"linux\"\n"), 0o600)
-	env := map[string]string{"REDDITBBS_CLIENT_ID": "envid", "REDDITBBS_CLIENT_SECRET": "envsecret"}
+	env := map[string]string{"RDDITBBS_CLIENT_ID": "envid", "RDDITBBS_CLIENT_SECRET": "envsecret"}
 	c, err := Load(p, func(k string) string { return env[k] })
 	if err != nil {
 		t.Fatal(err)

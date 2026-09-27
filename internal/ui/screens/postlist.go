@@ -5,13 +5,13 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/markalexwatson/redditbbs/internal/config"
-	"github.com/markalexwatson/redditbbs/internal/reddit"
-	"github.com/markalexwatson/redditbbs/internal/term"
-	"github.com/markalexwatson/redditbbs/internal/textfmt"
-	"github.com/markalexwatson/redditbbs/internal/theme"
-	"github.com/markalexwatson/redditbbs/internal/ui"
-	"github.com/markalexwatson/redditbbs/internal/ui/widgets"
+	"github.com/markalexwatson/rdditbbs/internal/config"
+	"github.com/markalexwatson/rdditbbs/internal/reddit"
+	"github.com/markalexwatson/rdditbbs/internal/term"
+	"github.com/markalexwatson/rdditbbs/internal/textfmt"
+	"github.com/markalexwatson/rdditbbs/internal/theme"
+	"github.com/markalexwatson/rdditbbs/internal/ui"
+	"github.com/markalexwatson/rdditbbs/internal/ui/widgets"
 )
 
 // newThreadIndex is indirected so this task compiles before Thread Index exists.

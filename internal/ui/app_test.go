@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/markalexwatson/redditbbs/internal/term"
-	"github.com/markalexwatson/redditbbs/internal/theme"
-	"github.com/markalexwatson/redditbbs/internal/ui/widgets"
+	"github.com/markalexwatson/rdditbbs/internal/term"
+	"github.com/markalexwatson/rdditbbs/internal/theme"
+	"github.com/markalexwatson/rdditbbs/internal/ui/widgets"
 )
 
 // stub is a configurable test screen.
@@ -61,7 +61,7 @@ func TestChromeAndContentSubCanvas(t *testing.T) {
 	root := &stub{name: "root"}
 	app, sim := newApp(root)
 	app.Draw()
-	if !strings.Contains(sim.Row(1), "R E D D I T   B B S") || !strings.Contains(sim.Row(1), "root") {
+	if !strings.Contains(sim.Row(1), "R D D I T   B B S") || !strings.Contains(sim.Row(1), "root") {
 		t.Errorf("title = %q", sim.Row(1))
 	}
 	if sim.Row(3) != "screen:root" {

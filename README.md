@@ -1,4 +1,4 @@
-# RedditBBS
+# rdditbbs
 
 A terminal Reddit reader that looks and feels like a 1990s bulletin board
 system: hotkey menus, a command prompt, numbered messages, a threaded
@@ -67,15 +67,15 @@ built-in sample data.
 
 ## Building
 
-`make build` (needs Go 1.27) produces a static binary at `bin/redditbbs`.
-`./bin/redditbbs --demo` runs the whole interface against sample data.
+`make build` (needs Go 1.27) produces a static binary at `bin/rdditbbs`.
+`./bin/rdditbbs --demo` runs the whole interface against sample data.
 
 With approved credentials, the first run shows a setup screen that checks
-them against Reddit and saves them to `~/.config/redditbbs/config.toml`
-with mode 0600. `REDDITBBS_CLIENT_ID` and `REDDITBBS_CLIENT_SECRET` override
+them against Reddit and saves them to `~/.config/rdditbbs/config.toml`
+with mode 0600. `RDDITBBS_CLIENT_ID` and `RDDITBBS_CLIENT_SECRET` override
 the file and are never written to disk. `--config PATH` uses another file.
 `--debug` saves the last unparseable API response to
-`~/.local/state/redditbbs/last-error.json`.
+`~/.local/state/rdditbbs/last-error.json`.
 
 ## Keys
 

@@ -6,11 +6,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/markalexwatson/redditbbs/internal/config"
-	"github.com/markalexwatson/redditbbs/internal/reddit/redditest"
-	"github.com/markalexwatson/redditbbs/internal/session"
-	"github.com/markalexwatson/redditbbs/internal/term"
-	"github.com/markalexwatson/redditbbs/internal/ui"
+	"github.com/markalexwatson/rdditbbs/internal/config"
+	"github.com/markalexwatson/rdditbbs/internal/reddit/redditest"
+	"github.com/markalexwatson/rdditbbs/internal/session"
+	"github.com/markalexwatson/rdditbbs/internal/term"
+	"github.com/markalexwatson/rdditbbs/internal/ui"
 )
 
 var testNow = time.Date(2026, 9, 26, 20, 30, 0, 0, time.UTC)

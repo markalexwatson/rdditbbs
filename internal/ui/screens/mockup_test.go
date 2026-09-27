@@ -8,21 +8,21 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/markalexwatson/redditbbs/internal/config"
-	"github.com/markalexwatson/redditbbs/internal/reddit/redditest"
-	"github.com/markalexwatson/redditbbs/internal/term"
-	"github.com/markalexwatson/redditbbs/internal/textfmt"
-	"github.com/markalexwatson/redditbbs/internal/theme"
-	"github.com/markalexwatson/redditbbs/internal/ui"
+	"github.com/markalexwatson/rdditbbs/internal/config"
+	"github.com/markalexwatson/rdditbbs/internal/reddit/redditest"
+	"github.com/markalexwatson/rdditbbs/internal/term"
+	"github.com/markalexwatson/rdditbbs/internal/textfmt"
+	"github.com/markalexwatson/rdditbbs/internal/theme"
+	"github.com/markalexwatson/rdditbbs/internal/ui"
 )
 
 // TestRenderMockups writes every screen as an HTML fragment when
-// REDDITBBS_MOCKUP_DIR is set, for screenshots in the README or a share page.
+// RDDITBBS_MOCKUP_DIR is set, for screenshots in the README or a share page.
 // It is skipped otherwise.
 func TestRenderMockups(t *testing.T) {
-	dir := os.Getenv("REDDITBBS_MOCKUP_DIR")
+	dir := os.Getenv("RDDITBBS_MOCKUP_DIR")
 	if dir == "" {
-		t.Skip("set REDDITBBS_MOCKUP_DIR to render screen mockups")
+		t.Skip("set RDDITBBS_MOCKUP_DIR to render screen mockups")
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)

@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/markalexwatson/redditbbs/internal/reddit"
+	"github.com/markalexwatson/rdditbbs/internal/reddit"
 )
 
 // DemoListing is a realistic r/linux front page for demo mode and screenshots.

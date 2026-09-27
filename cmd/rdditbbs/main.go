@@ -1,4 +1,4 @@
-// Command redditbbs is a BBS-style terminal reader for Reddit.
+// Command rdditbbs is a BBS-style terminal reader for Reddit.
 package main
 
 import (
@@ -12,15 +12,15 @@ import (
 	"sync"
 	"time"
 
-	"github.com/markalexwatson/redditbbs/internal/browser"
-	"github.com/markalexwatson/redditbbs/internal/config"
-	"github.com/markalexwatson/redditbbs/internal/reddit"
-	"github.com/markalexwatson/redditbbs/internal/reddit/redditest"
-	"github.com/markalexwatson/redditbbs/internal/session"
-	"github.com/markalexwatson/redditbbs/internal/term"
-	"github.com/markalexwatson/redditbbs/internal/theme"
-	"github.com/markalexwatson/redditbbs/internal/ui"
-	"github.com/markalexwatson/redditbbs/internal/ui/screens"
+	"github.com/markalexwatson/rdditbbs/internal/browser"
+	"github.com/markalexwatson/rdditbbs/internal/config"
+	"github.com/markalexwatson/rdditbbs/internal/reddit"
+	"github.com/markalexwatson/rdditbbs/internal/reddit/redditest"
+	"github.com/markalexwatson/rdditbbs/internal/session"
+	"github.com/markalexwatson/rdditbbs/internal/term"
+	"github.com/markalexwatson/rdditbbs/internal/theme"
+	"github.com/markalexwatson/rdditbbs/internal/ui"
+	"github.com/markalexwatson/rdditbbs/internal/ui/screens"
 )
 
 // Version is set at build time via -ldflags "-X main.Version=…".
@@ -31,7 +31,7 @@ func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
 // run parses flags, loads config and runs the UI. Exit codes: 0 ok, 1 runtime
 // failure, 2 usage or configuration error.
 func run(args []string, stdout, stderr io.Writer) (code int) {
-	fs := flag.NewFlagSet("redditbbs", flag.ContinueOnError)
+	fs := flag.NewFlagSet("rdditbbs", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	cfgPath := fs.String("config", "", "path to config.toml")
 	debugFlag := fs.Bool("debug", false, "save the last unparseable Reddit response to the state directory")
@@ -41,7 +41,7 @@ func run(args []string, stdout, stderr io.Writer) (code int) {
 		return 2
 	}
 	if *showVersion {
-		fmt.Fprintln(stdout, "redditbbs", Version)
+		fmt.Fprintln(stdout, "rdditbbs", Version)
 		return 0
 	}
 
@@ -49,24 +49,24 @@ func run(args []string, stdout, stderr io.Writer) (code int) {
 	if path == "" {
 		p, err := config.DefaultPath()
 		if err != nil {
-			fmt.Fprintln(stderr, "redditbbs: config:", err)
+			fmt.Fprintln(stderr, "rdditbbs: config:", err)
 			return 2
 		}
 		path = p
 	}
 	cfg, err := config.Load(path, os.Getenv)
 	if err != nil {
-		fmt.Fprintln(stderr, "redditbbs: config:", err)
+		fmt.Fprintln(stderr, "rdditbbs: config:", err)
 		return 2
 	}
 	if err := applyTheme(cfg); err != nil {
-		fmt.Fprintln(stderr, "redditbbs: config:", err)
+		fmt.Fprintln(stderr, "rdditbbs: config:", err)
 		return 2
 	}
 
 	t, err := term.NewTcell()
 	if err != nil {
-		fmt.Fprintln(stderr, "redditbbs: terminal:", err)
+		fmt.Fprintln(stderr, "rdditbbs: terminal:", err)
 		return 1
 	}
 	// One unconditional cleanup: Fini is idempotent, so every exit path
@@ -75,7 +75,7 @@ func run(args []string, stdout, stderr io.Writer) (code int) {
 	defer func() {
 		if p := recover(); p != nil {
 			t.Fini()
-			fmt.Fprintf(stderr, "redditbbs: panic: %v\n%s", p, rdebug.Stack())
+			fmt.Fprintf(stderr, "rdditbbs: panic: %v\n%s", p, rdebug.Stack())
 			code = 1
 		}
 	}()
@@ -117,7 +117,7 @@ func run(args []string, stdout, stderr io.Writer) (code int) {
 	err = app.Run()
 	t.Fini()
 	if err != nil {
-		fmt.Fprintln(stderr, "redditbbs:", err)
+		fmt.Fprintln(stderr, "rdditbbs:", err)
 		return 1
 	}
 	return 0
@@ -156,7 +156,7 @@ func applyTheme(cfg *config.Config) error {
 }
 
 // saveBadResponse atomically writes body to
-// $XDG_STATE_HOME/redditbbs/last-error.json with mode 0600.
+// $XDG_STATE_HOME/rdditbbs/last-error.json with mode 0600.
 func saveBadResponse(body []byte) {
 	badResponseMu.Lock()
 	defer badResponseMu.Unlock()
@@ -168,7 +168,7 @@ func saveBadResponse(body []byte) {
 		}
 		dir = filepath.Join(home, ".local", "state")
 	}
-	dir = filepath.Join(dir, "redditbbs")
+	dir = filepath.Join(dir, "rdditbbs")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return
 	}

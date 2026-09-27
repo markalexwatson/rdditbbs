@@ -3,8 +3,8 @@ package screens
 import (
 	"testing"
 
-	"github.com/markalexwatson/redditbbs/internal/term"
-	"github.com/markalexwatson/redditbbs/internal/theme"
+	"github.com/markalexwatson/rdditbbs/internal/term"
+	"github.com/markalexwatson/rdditbbs/internal/theme"
 )
 
 func TestAreaListRowsAndCursor(t *testing.T) {

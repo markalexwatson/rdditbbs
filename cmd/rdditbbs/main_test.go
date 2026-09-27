@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/markalexwatson/redditbbs/internal/config"
-	"github.com/markalexwatson/redditbbs/internal/term"
-	"github.com/markalexwatson/redditbbs/internal/theme"
+	"github.com/markalexwatson/rdditbbs/internal/config"
+	"github.com/markalexwatson/rdditbbs/internal/term"
+	"github.com/markalexwatson/rdditbbs/internal/theme"
 )
 
 func TestRunVersion(t *testing.T) {
@@ -16,7 +16,7 @@ func TestRunVersion(t *testing.T) {
 	if code := run([]string{"--version"}, &out, &errb); code != 0 {
 		t.Fatalf("code = %d, stderr %s", code, errb.String())
 	}
-	if !strings.HasPrefix(out.String(), "redditbbs ") {
+	if !strings.HasPrefix(out.String(), "rdditbbs ") {
 		t.Errorf("stdout = %q", out.String())
 	}
 }
