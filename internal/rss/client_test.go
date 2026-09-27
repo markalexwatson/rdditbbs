@@ -214,3 +214,105 @@ func TestPrefetchUsesSpareCapacityOnly(t *testing.T) {
 		t.Error("prefetching a cached thread must not refetch")
 	}
 }
+
+func TestFeedsAssumeOneRequestPerMinute(t *testing.T) {
+	s := &srv{}
+	s.handler = func(w http.ResponseWriter, r *http.Request, n int) bool {
+		http.ServeFile(w, r, "testdata/listing.xml") // no ratelimit headers at all
+		return true
+	}
+	c, _, slept := newTestClient(t, s)
+	ctx := context.Background()
+	c.Posts(ctx, "linux", reddit.Hot, "", reddit.Fetch{})
+	c.Posts(ctx, "rust", reddit.Hot, "", reddit.Fetch{})
+	if len(*slept) != 1 || (*slept)[0] != time.Minute {
+		t.Errorf("without headers the second feed request should wait a minute, slept %v", *slept)
+	}
+}
+
+func TestConcurrentSameURLCoalesced(t *testing.T) {
+	release := make(chan struct{})
+	s := &srv{}
+	s.handler = func(w http.ResponseWriter, r *http.Request, n int) bool {
+		<-release
+		return false
+	}
+	c, _, _ := newTestClient(t, s)
+	ctx := context.Background()
+	results := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		go func() { _, err := c.Thread(ctx, "linux", "1wr4fmd", reddit.Best, reddit.Fetch{}); results <- err }()
+	}
+	deadline := time.After(2 * time.Second)
+	for s.count() == 0 {
+		select {
+		case <-deadline:
+			t.Fatal("no request started")
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+	time.Sleep(50 * time.Millisecond)
+	close(release)
+	for i := 0; i < 2; i++ {
+		if err := <-results; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if s.count() != 1 {
+		t.Errorf("two readers of the same thread should share one request, got %d", s.count())
+	}
+}
+
+func TestCacheHitDoesNotRenewTTL(t *testing.T) {
+	s := &srv{}
+	c, clock, _ := newTestClient(t, s)
+	ctx := context.Background()
+	c.Thread(ctx, "linux", "1wr4fmd", reddit.Best, reddit.Fetch{})
+	clock.Advance(9 * time.Minute)
+	c.Thread(ctx, "linux", "1wr4fmd", reddit.Best, reddit.Fetch{})
+	clock.Advance(7 * time.Minute) // 16 minutes after the fetch
+	c.Thread(ctx, "linux", "1wr4fmd", reddit.Best, reddit.Fetch{})
+	if s.count() != 2 {
+		t.Errorf("a cache hit must not extend the entry's life; requests = %d", s.count())
+	}
+}
+
+func TestPrefetchIsSingleAttemptAndCancellable(t *testing.T) {
+	s := &srv{}
+	s.handler = func(w http.ResponseWriter, r *http.Request, n int) bool {
+		if n == 1 {
+			w.Header().Set("Retry-After", "30")
+			w.WriteHeader(429)
+			return true
+		}
+		return false
+	}
+	c, clock, slept := newTestClient(t, s)
+	if !c.Prefetch(context.Background(), "linux", "1wr4fmd") {
+		t.Fatal("capacity was available")
+	}
+	c.WaitPrefetch()
+	if len(*slept) != 0 || s.count() != 1 {
+		t.Errorf("a prefetch that hits 429 must give up silently: slept %v requests %d", *slept, s.count())
+	}
+	clock.Advance(time.Minute)
+	blocked := make(chan struct{})
+	s.handler = func(w http.ResponseWriter, r *http.Request, n int) bool {
+		select {
+		case <-blocked:
+		case <-r.Context().Done():
+		}
+		return false
+	}
+	if !c.Prefetch(context.Background(), "linux", "other") {
+		t.Fatal("capacity should be back after the reset")
+	}
+	done := make(chan struct{})
+	go func() { c.Close(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Close should cancel the in-flight prefetch")
+	}
+	close(blocked)
+}

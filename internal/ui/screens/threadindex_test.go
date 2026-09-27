@@ -212,8 +212,8 @@ func TestThreadIndexRSSModeFlatAndUnscored(t *testing.T) {
 	fs.Threads["aaa"] = th
 	app, sim := run(t, NewThreadIndex(d, th.Post))
 	pump(t, app)
-	mustContain(t, sim, "· RSS", "An image post with a caption.", "sched_nerd")
-	mustNotContain(t, sim, "412", "2.1k", "342 comments", "[load")
+	mustContain(t, sim, "· RSS", "FEED", "3 loaded", "An image post with a caption.", "sched_nerd")
+	mustNotContain(t, sim, "412", "2.1k", "342 comments", "[load", "BEST")
 	press(app, term.R('s'))
 	mustContain(t, sim, "Sorting is not available in RSS mode")
 	if fs.CallCount() != 1 {

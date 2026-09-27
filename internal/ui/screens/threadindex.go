@@ -28,6 +28,7 @@ const (
 type ThreadIndex struct {
 	d       *Deps
 	post    *reddit.Post
+	next    *reddit.Post       // the following post in the list, prefetched once this one loads
 	sort    reddit.CommentSort // committed
 	reqSort reddit.CommentSort // requested, shown while loading
 
@@ -77,16 +78,26 @@ func NewThreadIndex(d *Deps, post *reddit.Post) *ThreadIndex {
 	return t
 }
 
+// WithNext records the post after this one so its thread can be prefetched.
+func (t *ThreadIndex) WithNext(next *reddit.Post) *ThreadIndex {
+	t.next = next
+	return t
+}
+
 func (t *ThreadIndex) Init() ui.Action { return t.fetch(false) }
 func (t *ThreadIndex) Title() string   { return "Thread Index" }
 
 func (t *ThreadIndex) Info() string {
+	if t.d.Source == "rss" {
+		loaded := 0
+		if t.model != nil {
+			loaded = t.model.Loaded()
+		}
+		return fmt.Sprintf("r/%s · FEED · %d loaded", t.post.Subreddit, loaded) + t.d.sourceTag()
+	}
 	msgs := itoa(t.post.NumComments)
 	if !t.post.StatsKnown {
 		msgs = dash
-		if t.model != nil {
-			msgs = itoa(t.model.Loaded())
-		}
 	}
 	return fmt.Sprintf("r/%s · %s · %s msgs", t.post.Subreddit, strings.ToUpper(string(t.reqSort)), msgs) + t.d.sourceTag()
 }
@@ -163,6 +174,9 @@ func (t *ThreadIndex) Update(msg ui.Msg) ui.Action {
 		}
 		t.status, t.statusErr = "", false
 		t.refresh()
+		if pf, ok := t.d.Store.(prefetcher); ok && t.next != nil {
+			pf.Prefetch(context.Background(), t.post.Subreddit, t.next.ID) // warm the likely next read, now that this one is in
+		}
 	case moreMsg:
 		if m.gen != t.gen {
 			return nil

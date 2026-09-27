@@ -361,7 +361,11 @@ func TestPostListPrefetchesNextThread(t *testing.T) {
 	app, _ := run(t, NewPostList(d, linuxArea, true))
 	pump(t, app)
 	press(app, term.K(term.KeyEnter))
+	if len(ps.prefetched) != 0 {
+		t.Errorf("the selected thread must load before anything is prefetched, got %v", ps.prefetched)
+	}
+	pump(t, app) // the thread arrives
 	if len(ps.prefetched) != 1 || ps.prefetched[0] != "linux/p2" {
-		t.Errorf("opening post 1 should prefetch post 2's thread, got %v", ps.prefetched)
+		t.Errorf("after post 1 loads, post 2's thread should be prefetched, got %v", ps.prefetched)
 	}
 }

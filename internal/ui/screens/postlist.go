@@ -14,8 +14,9 @@ import (
 	"github.com/markalexwatson/rdditbbs/internal/ui/widgets"
 )
 
-// newThreadIndex is indirected so this task compiles before Thread Index exists.
-var newThreadIndex = func(d *Deps, p *reddit.Post) ui.Screen { return NewThreadIndex(d, p) }
+// newThreadIndex builds the thread screen for p; next is the post after it in
+// the list (or nil), which the thread screen may prefetch once p has loaded.
+var newThreadIndex = func(d *Deps, p, next *reddit.Post) ui.Screen { return NewThreadIndex(d, p).WithNext(next) }
 
 // PostList shows one subreddit's posts, paginated to the screen height.
 type PostList struct {
@@ -451,10 +452,11 @@ func (s *PostList) open(i int) ui.Action {
 	s.cursor = i
 	s.status = ""
 	s.d.Session.ThreadsOpened++
-	if pf, ok := s.d.Store.(prefetcher); ok && i+1 < len(s.posts) {
-		pf.Prefetch(context.Background(), s.area.Subreddit, s.posts[i+1].ID) // warm the likely next read
+	var next *reddit.Post
+	if i+1 < len(s.posts) {
+		next = s.posts[i+1]
 	}
-	return ui.Push{Screen: newThreadIndex(s.d, s.posts[i])}
+	return ui.Push{Screen: newThreadIndex(s.d, s.posts[i], next)}
 }
 
 // addArea adds the area to the config and saves; a failed save can be retried.
