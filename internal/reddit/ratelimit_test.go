@@ -150,3 +150,24 @@ func TestReleaseIgnoresStaleHigherRemaining(t *testing.T) {
 		t.Errorf("a new reset window should be accepted; slept %v", sl.slept)
 	}
 }
+
+func TestSetAllowance(t *testing.T) {
+	clock := &fakeClock{t: time.Unix(1_790_000_000, 0)}
+	sl := &fakeSleeper{clock: clock}
+	g := NewRateGate(clock.Now, sl.Sleep, nil)
+	g.SetAllowance(1)
+	if !g.TryAcquire() {
+		t.Fatal("first request allowed")
+	}
+	if g.TryAcquire() {
+		t.Error("an allowance of one admits one request at a time")
+	}
+	g.Release(http.Header{}) // no headers: falls back to the configured allowance per minute
+	if g.TryAcquire() {
+		t.Error("the single unit is spent until the assumed reset")
+	}
+	clock.Advance(61 * time.Second)
+	if !g.TryAcquire() {
+		t.Error("after the reset one unit is available again")
+	}
+}

@@ -21,6 +21,7 @@ type RateGate struct {
 	onWait func(time.Duration)
 
 	mu        sync.Mutex
+	allowance float64 // assumed budget per minute when headers are absent or after a reset
 	remaining float64
 	reset     time.Time
 	inflight  int
@@ -34,7 +35,18 @@ func NewRateGate(now func() time.Time, sleep func(context.Context, time.Duration
 	if sleep == nil {
 		sleep = SleepContext
 	}
-	return &RateGate{now: now, sleep: sleep, onWait: onWait, remaining: fallbackPerMinute}
+	return &RateGate{now: now, sleep: sleep, onWait: onWait, allowance: fallbackPerMinute, remaining: fallbackPerMinute}
+}
+
+// SetAllowance sets the assumed budget per minute (used before the first
+// response, when headers are missing, and after a reset). Feeds use 1.
+func (g *RateGate) SetAllowance(n float64) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.allowance = n
+	if g.reset.IsZero() {
+		g.remaining = n
+	}
 }
 
 // SleepContext sleeps for d or until ctx is done.
@@ -55,10 +67,10 @@ func (g *RateGate) Acquire(ctx context.Context) error {
 		g.mu.Lock()
 		now := g.now()
 		if !g.reset.IsZero() && !now.Before(g.reset) {
-			g.remaining = fallbackPerMinute
+			g.remaining = g.allowance
 			g.reset = time.Time{}
 		}
-		if g.remaining-float64(g.inflight) >= minHeadroom {
+		if g.remaining-float64(g.inflight) >= g.headroom() {
 			g.inflight++
 			g.mu.Unlock()
 			return nil
@@ -84,14 +96,23 @@ func (g *RateGate) TryAcquire() bool {
 	defer g.mu.Unlock()
 	now := g.now()
 	if !g.reset.IsZero() && !now.Before(g.reset) {
-		g.remaining = fallbackPerMinute
+		g.remaining = g.allowance
 		g.reset = time.Time{}
 	}
-	if g.remaining-float64(g.inflight) >= minHeadroom {
+	if g.remaining-float64(g.inflight) >= g.headroom() {
 		g.inflight++
 		return true
 	}
 	return false
+}
+
+// headroom is the margin kept below the limit: two requests on a normal
+// allowance, one when the allowance is a single request.
+func (g *RateGate) headroom() float64 {
+	if g.allowance < minHeadroom {
+		return 1
+	}
+	return minHeadroom
 }
 
 // Release records a response's headers and frees the reservation. Missing
@@ -131,7 +152,7 @@ func (g *RateGate) Release(h http.Header) {
 func (g *RateGate) Reset() {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	g.remaining = fallbackPerMinute
+	g.remaining = g.allowance
 	g.reset = time.Time{}
 }
 

@@ -8,12 +8,20 @@ import (
 	"golang.org/x/net/html"
 )
 
+// Limits on hostile input: quote nesting and total output.
+const (
+	maxQuoteDepth   = 8
+	maxOutput       = 256 << 10
+	truncatedMarker = "\n\n[text truncated]"
+)
+
 type conv struct {
 	out         strings.Builder
 	pre         int
 	quote       int
 	listStack   []int // 0 for unordered lists, else the next ordinal
 	atLineStart bool
+	truncated   bool
 }
 
 // ToMarkdown renders HTML as Markdown-ish text: paragraphs separated by blank
@@ -26,15 +34,29 @@ func ToMarkdown(src string) string {
 	}
 	c := &conv{atLineStart: true}
 	c.walk(doc)
-	return tidy(c.out.String())
+	out := tidy(c.out.String())
+	if c.truncated {
+		out += truncatedMarker
+	}
+	return out
 }
 
 func (c *conv) write(s string) {
-	if s == "" {
+	if s == "" || c.truncated {
 		return
 	}
+	if room := maxOutput - c.out.Len(); room <= 0 {
+		c.truncated = true
+		return
+	} else if len(s) > room {
+		s, c.truncated = s[:room], true // cut a single oversized run too
+	}
 	if c.atLineStart {
-		c.out.WriteString(strings.Repeat("> ", c.quote))
+		depth := c.quote
+		if depth > maxQuoteDepth {
+			depth = maxQuoteDepth
+		}
+		c.out.WriteString(strings.Repeat("> ", depth))
 		c.atLineStart = false
 	}
 	c.out.WriteString(s)
@@ -236,14 +258,27 @@ func itoa(n int) string {
 	return string(b)
 }
 
-// tidy trims trailing spaces, collapses runs of blank lines and trims the ends.
+// tidy trims trailing spaces and collapses runs of blank lines outside
+// fenced code, then trims the ends. Lines inside fences are kept verbatim.
 func tidy(s string) string {
 	lines := strings.Split(s, "\n")
 	var out []string
 	blank := 0
+	inFence := false
 	for _, l := range lines {
+		bare := strings.TrimLeft(l, "> ")
+		if strings.HasPrefix(bare, "```") {
+			inFence = !inFence
+			blank = 0
+			out = append(out, l)
+			continue
+		}
+		if inFence {
+			out = append(out, l)
+			continue
+		}
 		l = strings.TrimRight(l, " ")
-		if strings.TrimSpace(strings.TrimLeft(l, "> ")) == "" && !strings.HasPrefix(l, "```") {
+		if strings.TrimSpace(strings.TrimLeft(l, "> ")) == "" {
 			blank++
 			if blank > 1 {
 				continue

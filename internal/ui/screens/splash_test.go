@@ -44,3 +44,14 @@ func TestSplashShowsRSSMode(t *testing.T) {
 	_, sim := run(t, NewSplash(d))
 	mustContain(t, sim, "RSS MODE")
 }
+
+func TestSplashRSSModeSkipsSetup(t *testing.T) {
+	d, _ := newDeps(t)
+	d.Config.SetCredentials("", "")
+	d.Source = "rss"
+	app, _ := run(t, NewSplash(d))
+	press(app, term.K(term.KeyEnter))
+	if _, ok := app.Top().(*MainMenu); !ok {
+		t.Errorf("RSS mode needs no credentials and should go to the menu, got %T", app.Top())
+	}
+}

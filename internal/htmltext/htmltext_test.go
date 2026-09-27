@@ -1,6 +1,9 @@
 package htmltext
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestToMarkdown(t *testing.T) {
 	cases := []struct{ name, in, want string }{
@@ -24,5 +27,27 @@ func TestToMarkdown(t *testing.T) {
 		if got := ToMarkdown(c.in); got != c.want {
 			t.Errorf("%s:\n got %q\nwant %q", c.name, got, c.want)
 		}
+	}
+}
+
+func TestCodeBlocksAreLeftAlone(t *testing.T) {
+	got := ToMarkdown("<pre>&gt; quoted looking\n\n\nkeep blank lines   \n</pre>")
+	want := "```\n> quoted looking\n\n\nkeep blank lines   \n```"
+	if got != want {
+		t.Errorf("got %q want %q", got, want)
+	}
+	if got := ToMarkdown("<p>a</p><blockquote><pre>&gt;</pre></blockquote>"); got != "a\n\n> ```\n> >\n> ```" {
+		t.Errorf("quoted code = %q", got)
+	}
+}
+
+func TestOutputIsBounded(t *testing.T) {
+	deep := strings.Repeat("<blockquote>", 200) + "x" + strings.Repeat("</blockquote>", 200)
+	if out := ToMarkdown(deep); strings.Count(out, ">") > 16 {
+		t.Errorf("quote depth should be capped, got %d markers", strings.Count(out, ">"))
+	}
+	big := "<p>" + strings.Repeat("word ", 300000) + "</p>"
+	if out := ToMarkdown(big); len(out) > maxOutput+64 || !strings.HasSuffix(out, truncatedMarker) {
+		t.Errorf("output should be truncated with a marker, len %d", len(out))
 	}
 }

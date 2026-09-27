@@ -54,7 +54,7 @@ func (s *Splash) Draw(c term.Canvas) {
 }
 
 func (s *Splash) HandleKey(term.Key) ui.Action {
-	if s.d.Demo || s.d.Config.HasCredentials() {
+	if s.d.Demo || s.d.Source == "rss" || s.d.Config.HasCredentials() {
 		return ui.Replace{Screen: NewMainMenu(s.d)}
 	}
 	return ui.Replace{Screen: NewSetup(s.d)}

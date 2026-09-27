@@ -99,3 +99,55 @@ func TestParseRejectsNonFeed(t *testing.T) {
 		t.Error("a thread feed without a post entry should be rejected")
 	}
 }
+
+const atomHead = `<?xml version="1.0" encoding="UTF-8"?><feed xmlns="http://www.w3.org/2005/Atom"><category term="linux" label="r/linux"/>`
+
+func entryXML(id, author, content, href string) string {
+	return `<entry><author><name>/u/` + author + `</name></author><category term="linux" label="r/linux"/><content type="html">` + content +
+		`</content><id>` + id + `</id><link href="` + href + `"/><updated>2026-09-27T10:00:00+00:00</updated><title>t</title></entry>`
+}
+
+func TestLinkTrailerIsNotTakenFromTheBody(t *testing.T) {
+	body := `&lt;!-- SC_OFF --&gt;&lt;div class="md"&gt;&lt;p&gt;see &lt;a href="https://evil.example/x"&gt;[link]&lt;/a&gt; in my text&lt;/p&gt;&lt;/div&gt;&lt;!-- SC_ON --&gt; &amp;#32; submitted by &amp;#32; &lt;a href="https://www.reddit.com/user/a"&gt; /u/a &lt;/a&gt; &lt;br/&gt; &lt;span&gt;&lt;a href="https://www.reddit.com/r/linux/comments/abc/t/"&gt;[link]&lt;/a&gt;&lt;/span&gt; &amp;#32; &lt;span&gt;&lt;a href="https://www.reddit.com/r/linux/comments/abc/t/"&gt;[comments]&lt;/a&gt;&lt;/span&gt;`
+	l, err := ParseListing(strings.NewReader(atomHead + entryXML("t3_abc", "a", body, "https://www.reddit.com/r/linux/comments/abc/t/") + "</feed>"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := l.Posts[0]
+	if !p.IsSelf || p.URL != "https://www.reddit.com/r/linux/comments/abc/t/" {
+		t.Errorf("a [link] inside the body must not become the post destination: self=%v url=%q", p.IsSelf, p.URL)
+	}
+	if !strings.Contains(p.SelfText, "[[link]](https://evil.example/x)") && !strings.Contains(p.SelfText, "evil.example") {
+		t.Errorf("body link should survive as body text: %q", p.SelfText)
+	}
+}
+
+func TestLinkTrailerEntitiesDecoded(t *testing.T) {
+	body := `&amp;#32; submitted by &amp;#32; &lt;a href="https://www.reddit.com/user/a"&gt; /u/a &lt;/a&gt; &lt;br/&gt; &lt;span&gt;&lt;a href="https://example.com/p?a=1&amp;amp;b=2"&gt;[link]&lt;/a&gt;&lt;/span&gt; &amp;#32; &lt;span&gt;&lt;a href="https://www.reddit.com/r/linux/comments/abc/t/"&gt;[comments]&lt;/a&gt;&lt;/span&gt;`
+	l, err := ParseListing(strings.NewReader(atomHead + entryXML("t3_abc", "a", body, "https://www.reddit.com/r/linux/comments/abc/t/") + "</feed>"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p := l.Posts[0]; p.IsSelf || p.URL != "https://example.com/p?a=1&b=2" || p.SelfText != "" {
+		t.Errorf("link post = self %v url %q body %q", p.IsSelf, p.URL, p.SelfText)
+	}
+}
+
+func TestCommentMentioningSubmittedByKept(t *testing.T) {
+	body := `&lt;!-- SC_OFF --&gt;&lt;div class="md"&gt;&lt;p&gt;This patch was submitted by Alice.&lt;/p&gt;&lt;/div&gt;&lt;!-- SC_ON --&gt;`
+	feed := atomHead + entryXML("t1_c1", "b", body, "https://www.reddit.com/r/linux/comments/abc/t/c1/") +
+		entryXML("t3_abc", "a", `&lt;!-- SC_OFF --&gt;&lt;div class="md"&gt;&lt;p&gt;post&lt;/p&gt;&lt;/div&gt;&lt;!-- SC_ON --&gt;`, "https://www.reddit.com/r/linux/comments/abc/t/") + "</feed>"
+	th, err := ParseThread(strings.NewReader(feed))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(th.Comments) != 1 || th.Comments[0].Body != "This patch was submitted by Alice." {
+		t.Errorf("comment = %+v", th.Comments)
+	}
+	if th.Comments[0].ParentFullname != "t3_abc" {
+		t.Errorf("a comment listed before the post should still get the post as parent, got %q", th.Comments[0].ParentFullname)
+	}
+	if body := bodyOf(`<p>no markers, submitted by nobody</p>`); body != "no markers, submitted by nobody" {
+		t.Errorf("plain content mentioning the phrase must be kept: %q", body)
+	}
+}

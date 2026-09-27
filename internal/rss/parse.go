@@ -8,6 +8,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"net/url"
 	"regexp"
@@ -46,7 +47,23 @@ type category struct {
 var (
 	bodyRe     = regexp.MustCompile(`(?s)<!-- SC_OFF -->(.*?)<!-- SC_ON -->`)
 	linkHrefRe = regexp.MustCompile(`<a href="([^"]+)">\s*\[link\]\s*</a>`)
+	trailerRe  = regexp.MustCompile(`^\s*(?:&#32;\s*)?submitted by\b`)
 )
+
+// splitContent separates a post's body HTML from Reddit's trailer ("submitted
+// by … [link] [comments]"). Bodies sit between SC_OFF/SC_ON markers; a link
+// post without text has only the trailer.
+func splitContent(content string) (bodyHTML, trailer string) {
+	if i := strings.LastIndex(content, "<!-- SC_ON -->"); i >= 0 {
+		if m := bodyRe.FindStringSubmatch(content[:i+len("<!-- SC_ON -->")]); m != nil {
+			return m[1], content[i+len("<!-- SC_ON -->"):]
+		}
+	}
+	if trailerRe.MatchString(content) {
+		return "", content
+	}
+	return content, ""
+}
 
 func decode(r io.Reader) (feed, error) {
 	var f feed
@@ -81,16 +98,11 @@ func bareAuthor(s string) string {
 	return strings.TrimPrefix(strings.TrimSpace(s), "/u/")
 }
 
-// body extracts the Markdown-ish text of the entry's md block, dropping the
-// "submitted by / [link] / [comments]" trailer Reddit appends to posts.
-func body(content string) string {
-	if m := bodyRe.FindStringSubmatch(content); m != nil {
-		return htmltext.ToMarkdown(m[1])
-	}
-	if strings.Contains(content, "submitted by") {
-		return ""
-	}
-	return htmltext.ToMarkdown(content)
+// bodyOf converts an entry's body HTML to Markdown-ish text, without the
+// trailer Reddit appends to posts.
+func bodyOf(content string) string {
+	bodyHTML, _ := splitContent(content)
+	return htmltext.ToMarkdown(bodyHTML)
 }
 
 func permalinkPath(href string) string {
@@ -105,6 +117,7 @@ func (e entry) post() (*reddit.Post, error) {
 		return nil, fmt.Errorf("entry %q is not a post", e.ID)
 	}
 	permalink := e.href()
+	bodyHTML, trailer := splitContent(e.Content)
 	p := &reddit.Post{
 		ID:        strings.TrimPrefix(e.ID, "t3_"),
 		Fullname:  e.ID,
@@ -113,12 +126,12 @@ func (e entry) post() (*reddit.Post, error) {
 		Author:    bareAuthor(e.Author),
 		Created:   e.when(),
 		Permalink: permalinkPath(permalink),
-		SelfText:  body(e.Content),
+		SelfText:  htmltext.ToMarkdown(bodyHTML),
 		URL:       permalink,
 		IsSelf:    true,
 	}
-	if m := linkHrefRe.FindStringSubmatch(e.Content); m != nil {
-		target := m[1]
+	if m := linkHrefRe.FindStringSubmatch(trailer); m != nil {
+		target := html.UnescapeString(m[1])
 		if strings.HasPrefix(target, "/") {
 			target = "https://www.reddit.com" + target
 		}
@@ -168,30 +181,29 @@ func ParseThread(r io.Reader) (reddit.Thread, error) {
 	}
 	var th reddit.Thread
 	for _, e := range f.Entries {
-		switch {
-		case strings.HasPrefix(e.ID, "t3_") && th.Post == nil:
+		if strings.HasPrefix(e.ID, "t3_") && th.Post == nil {
 			p, err := e.post()
 			if err != nil {
 				return reddit.Thread{}, err
 			}
 			th.Post = p
-		case strings.HasPrefix(e.ID, "t1_"):
-			parent := ""
-			if th.Post != nil {
-				parent = th.Post.Fullname
-			}
-			th.Comments = append(th.Comments, &reddit.Comment{
-				ID:             strings.TrimPrefix(e.ID, "t1_"),
-				Fullname:       e.ID,
-				ParentFullname: parent,
-				Author:         bareAuthor(e.Author),
-				Body:           body(e.Content),
-				Created:        e.when(),
-			})
 		}
 	}
 	if th.Post == nil {
 		return reddit.Thread{}, errors.New("comment feed has no post entry")
+	}
+	for _, e := range f.Entries {
+		if !strings.HasPrefix(e.ID, "t1_") {
+			continue
+		}
+		th.Comments = append(th.Comments, &reddit.Comment{
+			ID:             strings.TrimPrefix(e.ID, "t1_"),
+			Fullname:       e.ID,
+			ParentFullname: th.Post.Fullname,
+			Author:         bareAuthor(e.Author),
+			Body:           bodyOf(e.Content),
+			Created:        e.when(),
+		})
 	}
 	return th, nil
 }
