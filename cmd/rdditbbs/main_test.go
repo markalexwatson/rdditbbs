@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"strings"
 	"testing"
@@ -140,5 +141,27 @@ func TestRunRejectsUnknownSource(t *testing.T) {
 	var out, errb bytes.Buffer
 	if code := run([]string{"--config", path}, &out, &errb); code != 2 || !strings.Contains(errb.String(), "source") {
 		t.Errorf("code = %d stderr = %q", code, errb.String())
+	}
+}
+
+func TestImportCommand(t *testing.T) {
+	path := t.TempDir() + "/config.toml"
+	defer func(r io.Reader) { stdin = r }(stdin)
+	stdin = strings.NewReader("r/linux r/rust\nhttps://old.reddit.com/r/vim+emacs\nbad!name\n")
+	var out, errb bytes.Buffer
+	if code := run([]string{"--config", path, "import"}, &out, &errb); code != 0 {
+		t.Fatalf("code = %d stderr %q", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "4 areas added") || !strings.Contains(out.String(), "bad!name") {
+		t.Errorf("stdout = %q", out.String())
+	}
+	cfg, err := config.Load(path, func(string) string { return "" })
+	if err != nil || len(cfg.Areas) != 4 || cfg.Areas[3].Subreddit != "emacs" {
+		t.Errorf("areas = %+v err %v", cfg.Areas, err)
+	}
+	stdin = strings.NewReader("r/linux")
+	out.Reset()
+	if code := run([]string{"--config", path, "import", "r/golang"}, &out, &errb); code != 0 || !strings.Contains(out.String(), "1 area added") {
+		t.Errorf("arguments should be accepted instead of stdin: code %d out %q", code, out.String())
 	}
 }

@@ -203,3 +203,28 @@ func TestSourceSetting(t *testing.T) {
 		t.Errorf("default source = %q, want auto", d.Reddit.Source)
 	}
 }
+
+func TestParseSubredditNames(t *testing.T) {
+	in := `r/linux, /r/Programming
+https://old.reddit.com/r/commandline/
+https://www.reddit.com/r/rust+golang+vim
+retrobattlestations  LINUX  bad!name x
+r/this_name_is_far_too_long_for_reddit`
+	names, invalid := ParseSubredditNames(in)
+	want := []string{"linux", "Programming", "commandline", "rust", "golang", "vim", "retrobattlestations"}
+	if strings.Join(names, ",") != strings.Join(want, ",") {
+		t.Errorf("names = %v\nwant    %v", names, want)
+	}
+	if strings.Join(invalid, ",") != "bad!name,x,this_name_is_far_too_long_for_reddit" {
+		t.Errorf("invalid = %v", invalid)
+	}
+}
+
+func TestImportAreas(t *testing.T) {
+	c := &Config{}
+	c.AddArea(Area{Name: "Linux", Subreddit: "linux"})
+	added := c.ImportAreas([]string{"LINUX", "rust", "golang", "rust"})
+	if added != 2 || len(c.Areas) != 3 || c.Areas[1].Name != "rust" || c.Areas[1].Subreddit != "rust" {
+		t.Errorf("added %d areas %+v", added, c.Areas)
+	}
+}

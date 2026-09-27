@@ -72,6 +72,15 @@ func run(args []string, stdout, stderr io.Writer) (code int) {
 		return 2
 	}
 	source := chooseSource(cfg, *rssFlag, *demo)
+	if fs.NArg() > 0 {
+		switch fs.Arg(0) {
+		case "import":
+			return runImport(cfg, fs.Args()[1:], stdout, stderr)
+		default:
+			fmt.Fprintf(stderr, "rdditbbs: unknown command %q (commands: import)\n", fs.Arg(0))
+			return 2
+		}
+	}
 
 	t, err := term.NewTcell()
 	if err != nil {
@@ -145,6 +154,40 @@ func run(args []string, stdout, stderr io.Writer) (code int) {
 }
 
 var badResponseMu sync.Mutex
+
+// stdin is where import reads pasted names from; tests replace it.
+var stdin io.Reader = os.Stdin
+
+// runImport adds subreddits to the configured areas from its arguments, or
+// from standard input when there are none.
+func runImport(cfg *config.Config, args []string, stdout, stderr io.Writer) int {
+	text := strings.Join(args, " ")
+	if len(args) == 0 {
+		b, err := io.ReadAll(io.LimitReader(stdin, 1<<20))
+		if err != nil {
+			fmt.Fprintln(stderr, "rdditbbs: import:", err)
+			return 1
+		}
+		text = string(b)
+	}
+	names, invalid := config.ParseSubredditNames(text)
+	added := cfg.ImportAreas(names)
+	if added > 0 {
+		if err := cfg.Save(); err != nil {
+			fmt.Fprintln(stderr, "rdditbbs: import: could not save config:", err)
+			return 1
+		}
+	}
+	plural := "s"
+	if added == 1 {
+		plural = ""
+	}
+	fmt.Fprintf(stdout, "%d area%s added, %d already present, %d areas in total.\n", added, plural, len(names)-added, len(cfg.Areas))
+	if len(invalid) > 0 {
+		fmt.Fprintf(stdout, "Skipped (not valid subreddit names): %s\n", strings.Join(invalid, ", "))
+	}
+	return 0
+}
 
 // chooseSource decides where posts come from: demo when asked, rss when
 // forced by flag or config, api when pinned, otherwise the API if credentials

@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -160,6 +161,47 @@ func (c *Config) AddArea(a Area) bool {
 	}
 	c.Areas = append(c.Areas, a)
 	return true
+}
+
+var subredditName = regexp.MustCompile(`^[A-Za-z0-9_]{2,21}$`)
+
+// ParseSubredditNames extracts subreddit names from pasted text: names
+// separated by whitespace, commas or plus signs, with or without r/ or a
+// reddit URL in front. It returns valid names once each (first spelling
+// wins, compared without case) and the tokens it could not accept.
+func ParseSubredditNames(text string) (names, invalid []string) {
+	seen := map[string]bool{}
+	for _, tok := range strings.FieldsFunc(text, func(r rune) bool {
+		return r == ',' || r == '+' || r == ' ' || r == '\n' || r == '\t' || r == '\r'
+	}) {
+		name := tok
+		if i := strings.LastIndex(name, "/r/"); i >= 0 {
+			name = name[i+3:]
+		}
+		name = strings.TrimPrefix(name, "r/")
+		name = strings.Trim(name, "/")
+		if !subredditName.MatchString(name) {
+			invalid = append(invalid, name)
+			continue
+		}
+		if key := strings.ToLower(name); !seen[key] {
+			seen[key] = true
+			names = append(names, name)
+		}
+	}
+	return names, invalid
+}
+
+// ImportAreas adds an area for each name not already configured and reports
+// how many were added.
+func (c *Config) ImportAreas(names []string) int {
+	added := 0
+	for _, n := range names {
+		if c.AddArea(Area{Name: n, Subreddit: n}) {
+			added++
+		}
+	}
+	return added
 }
 
 // RemoveArea deletes the area at index i; out-of-range is a no-op.
