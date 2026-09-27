@@ -18,6 +18,42 @@ comment index with a peek pane, and a one-message reader. Read-only.
 The screenshots are captured from the program itself on a 100 by 30
 simulated terminal with sample data; `make screenshots` regenerates them.
 
+## Themes
+
+Four themes are built in, all within the 16 ANSI colours so they work in
+any terminal and follow your terminal's own palette. `Ctrl-T` cycles them
+on any screen and remembers the choice.
+
+| `classic` | `blue` |
+| --- | --- |
+| ![classic](docs/screenshots/threadindex.png) | ![blue](docs/screenshots/theme-blue.png) |
+
+| `amber` | `green` |
+| --- | --- |
+| ![amber](docs/screenshots/theme-amber.png) | ![green](docs/screenshots/theme-green.png) |
+
+Pick one in the config, or define your own by overriding roles on top of a
+base theme. Each value is `<colour> [on <colour>] [bold] [reverse]` using
+the ANSI names (`black`, `red`, `green`, `yellow`, `blue`, `magenta`,
+`cyan`, `white`, their `bright` variants, `grey`, or `default`):
+
+```toml
+[display]
+theme = "custom"
+
+[theme]
+base = "classic"
+heading = "bright red"
+cursor = "black on cyan"
+author = "green bold"
+```
+
+Roles: `frame`, `logo`, `heading`, `subject`, `author`, `op`, `mod`, `meta`,
+`body`, `quote`, `code`, `bold`, `link`, `prompt`, `hotkey`, `error`,
+`stub`, `rule`, `cursor`, `sticky`, `nsfw`, `bar` (the fill behind the
+title and hotkey bars). A mistake in the table is reported at startup with
+the key that caused it.
+
 ## Setup
 
 1. Build: `make build` (needs Go 1.27). The binary is `bin/redditbbs`, statically linked.
@@ -41,8 +77,8 @@ saves the last unparseable API response to
 ## Keys
 
 Everywhere: `?` help, `Q` or `Esc` back, arrows and PgUp/PgDn move the
-cursor, type a number and `Enter` to select a row, `Ctrl-L` redraw,
-`Ctrl-C` quit.
+cursor, type a number and `Enter` to select a row, `Ctrl-T` next theme,
+`Ctrl-L` redraw, `Ctrl-C` quit.
 
 | Screen | Keys |
 | --- | --- |

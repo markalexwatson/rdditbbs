@@ -14,6 +14,7 @@ import (
 	"github.com/markalexwatson/redditbbs/internal/reddit/redditest"
 	"github.com/markalexwatson/redditbbs/internal/term"
 	"github.com/markalexwatson/redditbbs/internal/textfmt"
+	"github.com/markalexwatson/redditbbs/internal/theme"
 	"github.com/markalexwatson/redditbbs/internal/ui"
 )
 
@@ -75,6 +76,22 @@ func TestRenderMockups(t *testing.T) {
 	press(app, term.R('?'))
 	save("06-help")
 	press(app, term.R(' '))
+
+	// The thread index under every other built-in theme.
+	for _, name := range theme.Names() {
+		if name == "classic" {
+			continue
+		}
+		if err := theme.Set(name); err != nil {
+			t.Fatal(err)
+		}
+		app.Draw()
+		save("theme-" + name)
+	}
+	if err := theme.Set("classic"); err != nil {
+		t.Fatal(err)
+	}
+	app.Draw()
 
 	press(app, term.K(term.KeyEnter))
 	save("07-reader")
