@@ -100,6 +100,7 @@ var GlobalKeys = []KeyHelp{
 	{Key: "Q/Esc", Desc: "Back"},
 	{Key: "↑↓ PgUp PgDn", Desc: "Move"},
 	{Key: "0-9 ⏎", Desc: "Select by number"},
+	{Key: "Ctrl-T", Desc: "Next theme"},
 	{Key: "Ctrl-L", Desc: "Redraw"},
 	{Key: "Ctrl-C", Desc: "Quit"},
 }

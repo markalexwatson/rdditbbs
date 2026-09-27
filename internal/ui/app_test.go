@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/markalexwatson/redditbbs/internal/term"
+	"github.com/markalexwatson/redditbbs/internal/theme"
 	"github.com/markalexwatson/redditbbs/internal/ui/widgets"
 )
 
@@ -349,5 +350,53 @@ func TestRunLoopQuitsOnCtrlC(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("Run did not exit")
+	}
+}
+
+func TestCtrlTCyclesThemeAndNotifies(t *testing.T) {
+	t.Cleanup(func() { _ = theme.Set("classic") })
+	_ = theme.Set("classic")
+	root := &stub{name: "root"}
+	var saved []string
+	sim := term.NewSim(80, 24)
+	app := New(sim, root, WithThemeHook(func(name string) { saved = append(saved, name) }))
+	app.Handle(term.K(term.KeyCtrlT))
+	if theme.Current() != "blue" || len(saved) != 1 || saved[0] != "blue" {
+		t.Errorf("theme = %q saved = %v", theme.Current(), saved)
+	}
+	if len(root.keys) != 0 {
+		t.Error("Ctrl-T is global and must not reach the screen")
+	}
+	app.Draw()
+	if !strings.Contains(sim.Row(23), "Theme: blue") {
+		t.Errorf("prompt line should announce the theme, got %q", sim.Row(23))
+	}
+	app.Handle(term.R('x'))
+	app.Draw()
+	if strings.Contains(sim.Row(23), "Theme: blue") {
+		t.Error("the notice should clear on the next key")
+	}
+}
+
+func TestCtrlTIgnoredWhileModal(t *testing.T) {
+	t.Cleanup(func() { _ = theme.Set("classic") })
+	_ = theme.Set("classic")
+	root := &stub{name: "root", modal: true}
+	app, _ := newApp(root)
+	app.Handle(term.K(term.KeyCtrlT))
+	if theme.Current() != "classic" || len(root.keys) != 1 {
+		t.Error("a modal screen receives Ctrl-T itself")
+	}
+}
+
+func TestHelpListsThemeKey(t *testing.T) {
+	found := false
+	for _, k := range GlobalKeys {
+		if k.Key == "Ctrl-T" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("GlobalKeys should list Ctrl-T")
 	}
 }

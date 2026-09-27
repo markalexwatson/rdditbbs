@@ -38,15 +38,25 @@ type file struct {
 	Display struct {
 		PeekPane    bool   `toml:"peek_pane"`
 		DefaultSort string `toml:"default_sort"`
+		Theme       string `toml:"theme"`
 	} `toml:"display"`
-	Areas []Area `toml:"areas"`
+	ThemeTable map[string]string `toml:"theme,omitempty"`
+	Areas      []Area            `toml:"areas"`
+}
+
+// ThemeSettings is the optional [theme] table: a base theme plus per-role
+// colour overrides keyed by role name (see theme.RoleName).
+type ThemeSettings struct {
+	Base      string
+	Overrides map[string]string
 }
 
 // Config is the effective configuration: file values overlaid by environment
 // variables. Only file values are ever saved.
 type Config struct {
 	file
-	Path string
+	Path  string
+	Theme ThemeSettings
 
 	envID, envSecret string
 }
@@ -83,10 +93,24 @@ func Load(path string, getenv func(string) string) (*Config, error) {
 			c.Display.DefaultSort = "hot"
 		}
 	}
+	if c.Display.Theme == "" {
+		c.Display.Theme = "classic"
+	}
+	c.Theme = ThemeSettings{Base: "classic", Overrides: map[string]string{}}
+	for k, v := range c.ThemeTable {
+		if k == "base" {
+			c.Theme.Base = v
+			continue
+		}
+		c.Theme.Overrides[k] = v
+	}
 	c.envID = getenv("REDDITBBS_CLIENT_ID")
 	c.envSecret = getenv("REDDITBBS_CLIENT_SECRET")
 	return c, nil
 }
+
+// HasCustomTheme reports whether the [theme] table overrides any role.
+func (c *Config) HasCustomTheme() bool { return len(c.Theme.Overrides) > 0 }
 
 // ClientID is the effective client ID.
 func (c *Config) ClientID() string {
@@ -143,6 +167,13 @@ func (c *Config) RemoveArea(i int) {
 
 // Save writes the file atomically with mode 0600 in a 0700 directory.
 func (c *Config) Save() error {
+	c.ThemeTable = nil
+	if c.HasCustomTheme() || (c.Theme.Base != "" && c.Theme.Base != "classic") {
+		c.ThemeTable = map[string]string{"base": c.Theme.Base}
+		for k, v := range c.Theme.Overrides {
+			c.ThemeTable[k] = v
+		}
+	}
 	dir := filepath.Dir(c.Path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err

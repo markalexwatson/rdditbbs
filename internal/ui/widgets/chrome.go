@@ -40,7 +40,7 @@ func TitleBar(c term.Canvas, title, info string) {
 	c.Fill(1, 0, w-2, 1, '═', fr)
 	c.Put(w-1, 0, "╗", fr)
 	c.Put(0, 1, "║", fr)
-	c.Fill(1, 1, w-2, 1, ' ', term.Style{})
+	c.Fill(1, 1, w-2, 1, ' ', theme.Style(theme.Bar))
 	c.Put(w-1, 1, "║", fr)
 	c.Put(0, 2, "╚", fr)
 	c.Fill(1, 2, w-2, 1, '═', fr)
@@ -48,20 +48,21 @@ func TitleBar(c term.Canvas, title, info string) {
 
 	infoW := textfmt.Width(info)
 	x := 2
-	x += c.Text(x, 1, logo, theme.Style(theme.Logo), w)
-	x += c.Text(x, 1, " · ", theme.Style(theme.Meta), w)
+	x += c.Text(x, 1, logo, theme.OnBar(theme.Logo), w)
+	x += c.Text(x, 1, " · ", theme.OnBar(theme.Meta), w)
 	avail := w - 2 - infoW - 1 - x
 	if avail > 0 {
-		c.Text(x, 1, textfmt.Truncate(title, avail), theme.Style(theme.Subject), avail)
+		c.Text(x, 1, textfmt.Truncate(title, avail), theme.OnBar(theme.Subject), avail)
 	}
-	c.Text(w-2-infoW, 1, info, theme.Style(theme.Meta), infoW) // ends one cell before the frame
+	c.Text(w-2-infoW, 1, info, theme.OnBar(theme.Meta), infoW) // ends one cell before the frame
 }
 
 // HotkeyBar draws [K]desc pairs across row y.
 func HotkeyBar(c term.Canvas, y int, keys []KeyHelp) {
 	w, _ := c.Size()
+	c.Fill(0, y, w, 1, ' ', theme.Style(theme.Bar))
 	x := 2
-	meta, hot, body := theme.Style(theme.Meta), theme.Style(theme.Hotkey), theme.Style(theme.Body)
+	meta, hot, body := theme.OnBar(theme.Meta), theme.OnBar(theme.Hotkey), theme.OnBar(theme.Body)
 	for _, k := range keys {
 		need := 3 + textfmt.Width(k.Key) + textfmt.Width(k.Desc)
 		if x+need > w {

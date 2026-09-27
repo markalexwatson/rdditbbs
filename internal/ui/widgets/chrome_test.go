@@ -66,3 +66,26 @@ func TestRuleAndCentre(t *testing.T) {
 		t.Errorf("centre = %q", sim.Row(1))
 	}
 }
+
+func TestBarsUseThemeBarFill(t *testing.T) {
+	t.Cleanup(func() { _ = theme.Set("classic") })
+	if err := theme.Set("blue"); err != nil {
+		t.Fatal(err)
+	}
+	sim := term.NewSim(60, 4)
+	TitleBar(sim, "Message Areas", "r/linux")
+	HotkeyBar(sim, 3, []KeyHelp{{Key: "N", Desc: "ext"}})
+	bar := theme.Style(theme.Bar)
+	if _, st := sim.CellAt(30, 1); st.BG != bar.BG {
+		t.Errorf("title bar interior background = %+v, want %+v", st, bar)
+	}
+	if _, st := sim.CellAt(2, 1); st.BG != bar.BG || st.FG != theme.Style(theme.Logo).FG {
+		t.Errorf("logo should sit on the bar: %+v", st)
+	}
+	if _, st := sim.CellAt(40, 3); st.BG != bar.BG {
+		t.Errorf("hotkey bar background = %+v", st)
+	}
+	if _, st := sim.CellAt(3, 3); st.BG != bar.BG || st.FG != theme.Style(theme.Hotkey).FG {
+		t.Errorf("hotkey letter should sit on the bar: %+v", st)
+	}
+}

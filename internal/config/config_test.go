@@ -146,3 +146,44 @@ func TestAreaHelpers(t *testing.T) {
 	}
 	c.RemoveArea(5) // out of range is a no-op
 }
+
+func TestThemeSettings(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.toml")
+	os.WriteFile(p, []byte(`
+[display]
+theme = "amber"
+
+[theme]
+base = "classic"
+heading = "bright red"
+cursor = "black on cyan"
+`), 0o600)
+	c, err := Load(p, noEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Display.Theme != "amber" {
+		t.Errorf("theme = %q", c.Display.Theme)
+	}
+	if c.Theme.Base != "classic" || c.Theme.Overrides["heading"] != "bright red" || c.Theme.Overrides["cursor"] != "black on cyan" {
+		t.Errorf("theme table = %+v", c.Theme)
+	}
+	if !c.HasCustomTheme() {
+		t.Error("overrides present should mean a custom theme exists")
+	}
+	c.Display.Theme = "custom"
+	if err := c.Save(); err != nil {
+		t.Fatal(err)
+	}
+	again, _ := Load(p, noEnv)
+	if again.Display.Theme != "custom" || again.Theme.Overrides["heading"] != "bright red" || again.Theme.Base != "classic" {
+		t.Errorf("round trip = %+v %+v", again.Display, again.Theme)
+	}
+}
+
+func TestThemeDefaults(t *testing.T) {
+	c, _ := Load(filepath.Join(t.TempDir(), "config.toml"), noEnv)
+	if c.Display.Theme != "classic" || c.HasCustomTheme() || c.Theme.Base != "classic" {
+		t.Errorf("defaults = %+v %+v", c.Display, c.Theme)
+	}
+}

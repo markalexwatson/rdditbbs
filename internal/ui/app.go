@@ -30,6 +30,8 @@ type App struct {
 	w, h       int
 	minW, minH int
 	quit       bool
+	notice     string            // shown on the prompt line until the next key
+	onTheme    func(name string) // called after Ctrl-T switches theme
 }
 
 // Option configures App.
@@ -37,6 +39,10 @@ type Option func(*App)
 
 // WithMinSize sets the minimum usable terminal size (default 80x24).
 func WithMinSize(w, h int) Option { return func(a *App) { a.minW, a.minH = w, h } }
+
+// WithThemeHook sets a callback run with the new theme's name after Ctrl-T,
+// so the caller can persist the choice.
+func WithThemeHook(f func(name string)) Option { return func(a *App) { a.onTheme = f } }
 
 // New creates an App with root as the first screen and runs its Init.
 func New(t term.Terminal, root Screen, opts ...Option) *App {
@@ -137,6 +143,7 @@ func (a *App) handleKey(k term.Key) {
 	if a.small() {
 		return
 	}
+	a.notice = ""
 	top := a.top()
 	if top == nil {
 		a.quit = true
@@ -155,6 +162,12 @@ func (a *App) handleKey(k term.Key) {
 		a.push(newHelp(top.screen))
 	case k.Code == term.KeyCtrlL:
 		a.t.Sync()
+	case k.Code == term.KeyCtrlT:
+		name := theme.Next()
+		a.notice = "Theme: " + name
+		if a.onTheme != nil {
+			a.onTheme(name)
+		}
 	default:
 		a.apply(top, top.screen.HandleKey(k))
 	}
@@ -318,6 +331,9 @@ func (a *App) drawScreen(s Screen) {
 	var p widgets.Prompt
 	if pr, ok := s.(Prompter); ok {
 		p = pr.Prompt()
+	}
+	if a.notice != "" {
+		p.Status, p.Error = a.notice, false // a direct reply to the last key outranks screen status
 	}
 	widgets.PromptLine(a.t, a.h-1, p)
 	s.Draw(term.Sub(a.t, 0, widgets.TitleRows, a.w, a.h-widgets.ChromeRows))
