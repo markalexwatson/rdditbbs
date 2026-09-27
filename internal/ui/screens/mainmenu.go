@@ -67,6 +67,9 @@ func (m *MainMenu) Draw(c term.Canvas) {
 		c.Text(24, y, it.desc, theme.Style(theme.Meta), w-24)
 	}
 	c.Text(2, 3+len(menuItems)*2+1, "Areas configured: "+itoa(len(m.d.Config.Areas)), theme.Style(theme.Meta), w)
+	if m.d.CacheInfo != nil {
+		c.Text(2, 3+len(menuItems)*2+2, m.d.CacheInfo(), theme.Style(theme.Meta), w-4)
+	}
 }
 
 func (m *MainMenu) HandleKey(k term.Key) ui.Action {

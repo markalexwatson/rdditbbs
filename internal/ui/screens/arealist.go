@@ -82,6 +82,7 @@ func (a *AreaList) HandleKey(k term.Key) ui.Action {
 		if Rune(k) == 'Y' {
 			a.d.Config.RemoveArea(a.table.Cursor)
 			a.table.SetCount(len(a.d.Config.Areas))
+			a.d.areasChanged()
 			if err := a.d.Config.Save(); err != nil {
 				a.status, a.statusErr = "Could not save config: "+errText(err), true
 			}

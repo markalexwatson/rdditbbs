@@ -65,3 +65,10 @@ func TestMainMenuQuestionMarkInsideJoinIsLiteral(t *testing.T) {
 	}
 	mustContain(t, sim, "Join area: ?")
 }
+
+func TestMainMenuShowsCacheInfo(t *testing.T) {
+	d, _ := newDeps(t)
+	d.CacheInfo = func() string { return "Offline cache: 3 listings, 41 threads, last fetch 18:42" }
+	_, sim := run(t, NewMainMenu(d))
+	mustContain(t, sim, "Offline cache: 3 listings, 41 threads")
+}

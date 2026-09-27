@@ -88,11 +88,54 @@ doubt. What changes:
 - No scores or comment counts; those columns show `–`.
 - Comments arrive flat, in feed order, with no threading, folding or
   "load more". Sorting comments is not available.
-- Reddit allows roughly one feed request a minute per address. Listings
-  are cached for 10 minutes and threads for 15, and while you read one
-  thread the next post's thread is prefetched if the allowance permits,
-  so browsing in order feels quicker than jumping about. When you do have
-  to wait, the status line shows the countdown.
+- Reddit allows roughly one feed request a minute per address. To make
+  that livable the program keeps an offline cache on disk
+  (`~/.cache/rdditbbs/feeds`) and stocks it in the background, the way an
+  offline mail reader polls a board: listings for your areas first, then
+  the threads of the leading posts in each. Posts marked `•` in the list
+  are already on disk and open without waiting. Anything older than a day
+  is dropped. When you do have to wait, the status line shows the
+  countdown, and a reader waiting always goes ahead of background work.
+
+### Stocking the cache without the interface
+
+`rdditbbs sync` runs the same background fetching on its own, so the board
+is full before you sit down. `--once` does a single sweep and exits, which
+suits a timer; `--threads N` sets how many threads to keep per area
+(default 10). A user-level systemd timer, for example:
+
+```ini
+# ~/.config/systemd/user/rdditbbs-sync.service
+[Service]
+Type=oneshot
+ExecStart=%h/Projects/RedditBBS/bin/rdditbbs sync --once
+
+# ~/.config/systemd/user/rdditbbs-sync.timer
+[Timer]
+OnCalendar=*:0/30
+Persistent=true
+[Install]
+WantedBy=timers.target
+```
+
+Enable it with `systemctl --user enable --now rdditbbs-sync.timer`.
+
+## Your subreddits
+
+The areas are a list in the config file; nothing is read from your Reddit
+account. To bring your subscriptions in, open
+https://old.reddit.com/subreddits/mine while logged in, copy the list (or
+the address of the "multireddit of your subscriptions" link in the
+sidebar), and paste it into:
+
+```
+rdditbbs import
+```
+
+It accepts names, `r/name`, full addresses and `a+b+c` lists, from
+arguments or standard input, skips what is already there, and reports
+anything that is not a valid subreddit name. Inside the program, `J` joins
+any subreddit and `A` adds it to the list.
 
 ## Keys
 

@@ -3,8 +3,11 @@ package main
 import (
 	"bytes"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/markalexwatson/rdditbbs/internal/config"
@@ -163,5 +166,49 @@ func TestImportCommand(t *testing.T) {
 	out.Reset()
 	if code := run([]string{"--config", path, "import", "r/golang"}, &out, &errb); code != 0 || !strings.Contains(out.String(), "1 area added") {
 		t.Errorf("arguments should be accepted instead of stdin: code %d out %q", code, out.String())
+	}
+}
+
+func TestSyncOnceCommand(t *testing.T) {
+	var mu sync.Mutex
+	var got []string
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		got = append(got, r.URL.Path)
+		mu.Unlock()
+		w.Header().Set("X-Ratelimit-Remaining", "50")
+		w.Header().Set("X-Ratelimit-Reset", "1")
+		if strings.Contains(r.URL.Path, "/comments/") {
+			http.ServeFile(w, r, "../../internal/rss/testdata/thread.xml")
+			return
+		}
+		http.ServeFile(w, r, "../../internal/rss/testdata/listing.xml")
+	}))
+	defer hs.Close()
+	defer func(u string, c func() (string, error)) { feedBaseURL, cacheDir = u, c }(feedBaseURL, cacheDir)
+	feedBaseURL = hs.URL
+	cache := t.TempDir()
+	cacheDir = func() (string, error) { return cache, nil }
+
+	path := t.TempDir() + "/config.toml"
+	if err := writeFile(path, "[[areas]]\nname = \"Linux\"\nsubreddit = \"linux\"\n"); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	if code := run([]string{"--config", path, "sync", "--once", "--threads", "2"}, &out, &errb); code != 0 {
+		t.Fatalf("code = %d stderr %q", code, errb.String())
+	}
+	mu.Lock()
+	n := len(got)
+	mu.Unlock()
+	if n != 3 {
+		t.Errorf("one listing and two threads expected, got %v", got)
+	}
+	if !strings.Contains(out.String(), "r/linux listing") || !strings.Contains(out.String(), "3 feeds fetched") {
+		t.Errorf("stdout = %q", out.String())
+	}
+	entries, _ := os.ReadDir(cache + "/feeds")
+	if len(entries) != 3 {
+		t.Errorf("cache should hold three feeds, has %d", len(entries))
 	}
 }

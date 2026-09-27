@@ -288,7 +288,11 @@ func (s *PostList) Draw(c term.Canvas) {
 			c.Fill(0, y, w, 1, ' ', theme.Style(theme.Cursor))
 		}
 		x := 2
-		x += c.Text(x, y, textfmt.PadLeft(itoa(i-start+1), numW)+"  ", st(theme.Meta), w)
+		gap := "  "
+		if cs, ok := s.d.Store.(cacher); ok && cs.Cached(s.area.Subreddit, p.ID) {
+			gap = " •" // this thread is already on disk: opening it will not wait
+		}
+		x += c.Text(x, y, textfmt.PadLeft(itoa(i-start+1), numW)+gap, st(theme.Meta), w)
 		sx := x
 		if p.Stickied {
 			sx += c.Text(sx, y, "* ", st(theme.Sticky), w)
@@ -471,6 +475,7 @@ func (s *PostList) addArea() {
 	}
 	s.saved = true
 	s.status, s.statusErr = "Area saved", false
+	s.d.areasChanged()
 }
 
 func (s *PostList) openLink() ui.Action {

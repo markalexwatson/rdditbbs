@@ -2,14 +2,17 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	rdebug "runtime/debug"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/markalexwatson/rdditbbs/internal/browser"
@@ -76,8 +79,10 @@ func run(args []string, stdout, stderr io.Writer) (code int) {
 		switch fs.Arg(0) {
 		case "import":
 			return runImport(cfg, fs.Args()[1:], stdout, stderr)
+		case "sync":
+			return runSync(cfg, fs.Args()[1:], stdout, stderr)
 		default:
-			fmt.Fprintf(stderr, "rdditbbs: unknown command %q (commands: import)\n", fs.Arg(0))
+			fmt.Fprintf(stderr, "rdditbbs: unknown command %q (commands: import, sync)\n", fs.Arg(0))
 			return 2
 		}
 	}
@@ -124,14 +129,23 @@ func run(args []string, stdout, stderr io.Writer) (code int) {
 			deps.Store = deps.MakeStore(cfg.ClientID(), cfg.ClientSecret())
 		}
 	case "rss":
-		deps.Store = rss.NewClient(cfg.Reddit.UserAgent, rss.WithOnWait(func(d time.Duration) {
-			if app != nil {
-				app.Post(ui.RateLimited{Wait: d})
-			}
-		}))
 		if len(cfg.Areas) == 0 {
 			cfg.Areas = append([]config.Area(nil), config.DefaultAreas...)
 		}
+		feeds := newFeedClient(cfg, func(d time.Duration) {
+			if app != nil {
+				app.Post(ui.RateLimited{Wait: d})
+			}
+		})
+		defer feeds.Close()
+		deps.Store = feeds
+		syncer := rss.NewSyncer(feeds, areaNames(cfg))
+		syncer.Sort = reddit.Sort(cfg.Display.DefaultSort)
+		syncCtx, stopSync := context.WithCancel(context.Background())
+		defer stopSync()
+		go syncer.Run(syncCtx)
+		deps.OnAreasChanged = func() { syncer.SetAreas(areaNames(cfg)) }
+		deps.CacheInfo = func() string { return cacheInfo(feeds.Stats()) }
 	case "demo":
 		deps.Demo = true
 		deps.Store = redditest.NewDemoStore(time.Now)
@@ -154,6 +168,80 @@ func run(args []string, stdout, stderr io.Writer) (code int) {
 }
 
 var badResponseMu sync.Mutex
+
+// feedBaseURL and cacheDir are variables so tests can redirect them.
+var (
+	feedBaseURL = rss.DefaultBaseURL
+	cacheDir    = func() (string, error) {
+		d, err := os.UserCacheDir()
+		return filepath.Join(d, "rdditbbs"), err
+	}
+)
+
+func areaNames(cfg *config.Config) []string {
+	names := make([]string, len(cfg.Areas))
+	for i, a := range cfg.Areas {
+		names[i] = a.Subreddit
+	}
+	return names
+}
+
+// newFeedClient builds the RSS client with its disk store. Without a usable
+// cache directory it still works, from memory only.
+func newFeedClient(cfg *config.Config, onWait func(time.Duration)) *rss.Client {
+	c := rss.NewClient(cfg.Reddit.UserAgent, rss.WithBaseURL(feedBaseURL), rss.WithOnWait(onWait))
+	if dir, err := cacheDir(); err == nil {
+		if d, err := rss.NewDisk(filepath.Join(dir, "feeds")); err == nil {
+			c.UseDisk(d)
+		}
+	}
+	return c
+}
+
+func cacheInfo(st rss.DiskStats) string {
+	if st.Entries == 0 {
+		return "Offline cache: empty, filling in the background"
+	}
+	return fmt.Sprintf("Offline cache: %d listings, %d threads, last fetch %s", st.Listings, st.Threads, st.Newest.Local().Format("15:04"))
+}
+
+// runSync stocks the offline cache without the interface: one sweep with
+// --once (for a timer), otherwise continuously until interrupted.
+func runSync(cfg *config.Config, args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("rdditbbs sync", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	once := fs.Bool("once", false, "do one sweep and exit")
+	threads := fs.Int("threads", 10, "threads to keep cached per area")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if len(cfg.Areas) == 0 {
+		fmt.Fprintln(stderr, "rdditbbs: sync: no areas configured; add some with `rdditbbs import`")
+		return 2
+	}
+	feeds := newFeedClient(cfg, nil)
+	defer feeds.Close()
+	syncer := rss.NewSyncer(feeds, areaNames(cfg))
+	syncer.Sort = reddit.Sort(cfg.Display.DefaultSort)
+	syncer.PerArea = *threads
+	syncer.Log = func(format string, a ...any) {
+		fmt.Fprintf(stdout, time.Now().Format("15:04:05")+" "+format+"\n", a...)
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if *once {
+		n, err := syncer.Sweep(ctx)
+		fmt.Fprintf(stdout, "%d feeds fetched. %s\n", n, cacheInfo(feeds.Stats()))
+		if err != nil && ctx.Err() == nil {
+			fmt.Fprintln(stderr, "rdditbbs: sync:", err)
+			return 1
+		}
+		return 0
+	}
+	fmt.Fprintf(stdout, "Syncing %d areas about once a minute; Ctrl-C to stop.\n", len(cfg.Areas))
+	syncer.Run(ctx)
+	return 0
+}
 
 // stdin is where import reads pasted names from; tests replace it.
 var stdin io.Reader = os.Stdin

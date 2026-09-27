@@ -369,3 +369,39 @@ func TestPostListPrefetchesNextThread(t *testing.T) {
 		t.Errorf("after post 1 loads, post 2's thread should be prefetched, got %v", ps.prefetched)
 	}
 }
+
+type cachedStore struct {
+	*redditest.FakeStore
+	have map[string]bool
+}
+
+func (c *cachedStore) Cached(sub, id string) bool { return c.have[sub+"/"+id] }
+
+func TestPostListMarksCachedThreads(t *testing.T) {
+	d, fs := newDeps(t)
+	fs.Listings["linux/hot/"] = redditest.SampleListing(3, "")
+	d.Store = &cachedStore{FakeStore: fs, have: map[string]bool{"linux/p2": true}}
+	app, sim := run(t, NewPostList(d, linuxArea, true))
+	pump(t, app)
+	if strings.Contains(sim.Row(5), "•") || !strings.Contains(sim.Row(6), "•") || strings.Contains(sim.Row(7), "•") {
+		t.Errorf("only the cached thread (row 2) should carry the marker:\n%s\n%s\n%s", sim.Row(5), sim.Row(6), sim.Row(7))
+	}
+}
+
+func TestAreaChangesNotifyTheSyncer(t *testing.T) {
+	d, fs := newDeps(t)
+	changed := 0
+	d.OnAreasChanged = func() { changed++ }
+	fs.Listings["golang/hot/"] = redditest.SampleListing(1, "")
+	app, _ := run(t, NewPostList(d, config.Area{Name: "r/golang", Subreddit: "golang"}, false))
+	pump(t, app)
+	press(app, term.R('a'))
+	if changed != 1 {
+		t.Errorf("adding an area should notify once, got %d", changed)
+	}
+	app2, _ := run(t, NewAreaList(d))
+	press(app2, term.R('d'), term.R('y'))
+	if changed != 2 {
+		t.Errorf("deleting an area should notify, got %d", changed)
+	}
+}

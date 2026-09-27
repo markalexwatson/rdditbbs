@@ -28,6 +28,9 @@ type Deps struct {
 	Version   string
 	Demo      bool   // sample data, no credentials: skip setup and say so on the splash
 	Source    string // "api", "rss" or "demo": shown in the title bar when not the API
+
+	OnAreasChanged func()        // called after the configured areas change, so a syncer can follow
+	CacheInfo      func() string // one line about the offline cache for the main menu, or nil
 }
 
 // sourceTag is the title-bar suffix for non-API sources.
@@ -42,6 +45,18 @@ func (d *Deps) sourceTag() string {
 // background without delaying foreground requests.
 type prefetcher interface {
 	Prefetch(ctx context.Context, subreddit, postID string) bool
+}
+
+// cacher is implemented by stores that know whether a thread can be shown
+// without the network.
+type cacher interface {
+	Cached(subreddit, postID string) bool
+}
+
+func (d *Deps) areasChanged() {
+	if d.OnAreasChanged != nil {
+		d.OnAreasChanged()
+	}
 }
 
 // dash stands in for a number the source does not provide.
