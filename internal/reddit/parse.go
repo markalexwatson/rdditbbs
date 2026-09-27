@@ -105,7 +105,7 @@ func parsePost(raw json.RawMessage) (*Post, error) {
 		ID: d.ID, Fullname: d.Name, Subreddit: d.Subreddit, Title: d.Title, Author: d.Author,
 		Score: d.Score, NumComments: d.NumComments, Created: unixTime(d.CreatedUTC),
 		URL: d.URL, Domain: d.Domain, Permalink: d.Permalink, IsSelf: d.IsSelf, SelfText: d.Selftext,
-		Stickied: d.Stickied, Over18: d.Over18, Distinguished: str(d.Distinguished),
+		Stickied: d.Stickied, Over18: d.Over18, Distinguished: str(d.Distinguished), StatsKnown: true,
 	}, nil
 }
 
@@ -189,7 +189,7 @@ func parseComment(raw json.RawMessage, depth int) (*Comment, error) {
 	c := &Comment{
 		ID: d.ID, Fullname: d.Name, ParentFullname: d.ParentID, Author: d.Author, Body: d.Body,
 		Score: d.Score, Created: unixTime(d.CreatedUTC), Depth: depth, IsSubmitter: d.IsSubmitter,
-		Distinguished: str(d.Distinguished),
+		Distinguished: str(d.Distinguished), StatsKnown: true,
 		AuthorDeleted: d.Author == "[deleted]",
 		BodyRemoved:   d.Body == "[deleted]" || d.Body == "[removed]",
 	}

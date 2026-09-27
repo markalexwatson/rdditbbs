@@ -77,6 +77,23 @@ func (g *RateGate) Acquire(ctx context.Context) error {
 	}
 }
 
+// TryAcquire reserves a unit only if one is available now; it never waits.
+// Background prefetching uses it so it can never delay a user's request.
+func (g *RateGate) TryAcquire() bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	now := g.now()
+	if !g.reset.IsZero() && !now.Before(g.reset) {
+		g.remaining = fallbackPerMinute
+		g.reset = time.Time{}
+	}
+	if g.remaining-float64(g.inflight) >= minHeadroom {
+		g.inflight++
+		return true
+	}
+	return false
+}
+
 // Release records a response's headers and frees the reservation. Missing
 // headers count down an assumed allowance of 60 per minute. Responses can
 // arrive out of order, so within one reset window a higher remaining count

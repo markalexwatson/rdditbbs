@@ -82,6 +82,7 @@ type Post struct {
 	Stickied      bool
 	Over18        bool
 	Distinguished string
+	StatsKnown    bool // false when the source (RSS) has no score or comment count
 }
 
 // IsOP reports whether author wrote the post.
@@ -99,6 +100,7 @@ type Comment struct {
 	Distinguished  string
 	AuthorDeleted  bool
 	BodyRemoved    bool
+	StatsKnown     bool // false when the source (RSS) has no score
 	Children       []*Comment
 	More           *MoreStub // unloaded replies to this comment, if any
 }

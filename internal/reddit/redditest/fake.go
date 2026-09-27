@@ -111,7 +111,7 @@ var base = time.Date(2026, 9, 26, 12, 0, 0, 0, time.UTC)
 func SamplePost(id, title string) *reddit.Post {
 	return &reddit.Post{
 		ID: id, Fullname: "t3_" + id, Subreddit: "linux", Title: title, Author: "author_" + id,
-		Score: 100, NumComments: 10, Created: base.Add(-3 * time.Hour),
+		Score: 100, NumComments: 10, Created: base.Add(-3 * time.Hour), StatsKnown: true,
 		URL: "https://example.com/" + id, Domain: "example.com", Permalink: "/r/linux/comments/" + id + "/",
 	}
 }
@@ -130,9 +130,9 @@ func SampleThread() reddit.Thread {
 	post := SamplePost("aaa", "Kernel 7.2 released")
 	post.Author = "torvaldsfan"
 	post.NumComments = 342
-	c2 := &reddit.Comment{ID: "c2", Fullname: "t1_c2", ParentFullname: "t1_c1", Author: "torvaldsfan", Body: "Agreed.", Score: 98, Created: base.Add(-time.Hour), Depth: 1, IsSubmitter: true}
-	c1 := &reddit.Comment{ID: "c1", Fullname: "t1_c1", ParentFullname: "t3_aaa", Author: "sched_nerd", Body: "The EEVDF changes are the headline.\n\nLazy preemption is the real win.", Score: 412, Created: base.Add(-2 * time.Hour), Children: []*reddit.Comment{c2}, More: &reddit.MoreStub{ParentFullname: "t1_c1", Count: 3, IDs: []string{"x", "y", "z"}}}
-	c3 := &reddit.Comment{ID: "c3", Fullname: "t1_c3", ParentFullname: "t3_aaa", Author: "[deleted]", AuthorDeleted: true, Body: "Body survives the account.", Score: 5, Created: base.Add(-2 * time.Hour)}
-	c4 := &reddit.Comment{ID: "c4", Fullname: "t1_c4", ParentFullname: "t3_aaa", Author: "modbot", Body: "[removed]", BodyRemoved: true, Score: 1, Created: base.Add(-2 * time.Hour), Distinguished: "moderator", More: &reddit.MoreStub{ParentFullname: "t1_c4"}}
+	c2 := &reddit.Comment{ID: "c2", Fullname: "t1_c2", ParentFullname: "t1_c1", Author: "torvaldsfan", Body: "Agreed.", Score: 98, Created: base.Add(-time.Hour), Depth: 1, IsSubmitter: true, StatsKnown: true}
+	c1 := &reddit.Comment{ID: "c1", Fullname: "t1_c1", ParentFullname: "t3_aaa", Author: "sched_nerd", StatsKnown: true, Body: "The EEVDF changes are the headline.\n\nLazy preemption is the real win.", Score: 412, Created: base.Add(-2 * time.Hour), Children: []*reddit.Comment{c2}, More: &reddit.MoreStub{ParentFullname: "t1_c1", Count: 3, IDs: []string{"x", "y", "z"}}}
+	c3 := &reddit.Comment{ID: "c3", Fullname: "t1_c3", ParentFullname: "t3_aaa", Author: "[deleted]", AuthorDeleted: true, StatsKnown: true, Body: "Body survives the account.", Score: 5, Created: base.Add(-2 * time.Hour)}
+	c4 := &reddit.Comment{ID: "c4", Fullname: "t1_c4", ParentFullname: "t3_aaa", Author: "modbot", Body: "[removed]", BodyRemoved: true, StatsKnown: true, Score: 1, Created: base.Add(-2 * time.Hour), Distinguished: "moderator", More: &reddit.MoreStub{ParentFullname: "t1_c4"}}
 	return reddit.Thread{Post: post, Comments: []*reddit.Comment{c1, c3, c4}, More: &reddit.MoreStub{ParentFullname: "t3_aaa", Count: 40, IDs: []string{"p", "q"}}}
 }

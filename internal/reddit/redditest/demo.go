@@ -47,7 +47,7 @@ func DemoListing(now time.Time) reddit.Listing {
 // DemoThread is a realistic comment thread for demo mode and screenshots.
 func DemoThread(now time.Time) reddit.Thread {
 	c := func(id, parent, author, body string, score int, age time.Duration, kids ...*reddit.Comment) *reddit.Comment {
-		return &reddit.Comment{ID: id, Fullname: "t1_" + id, ParentFullname: parent, Author: author, Body: body, Score: score, Created: now.Add(-age), Children: kids}
+		return &reddit.Comment{ID: id, Fullname: "t1_" + id, ParentFullname: parent, Author: author, Body: body, Score: score, Created: now.Add(-age), Children: kids, StatsKnown: true}
 	}
 	post := SamplePost("k72", "Kernel 7.2 released with the new EEVDF scheduler and lazy preemption")
 	post.Author, post.Score, post.NumComments, post.Created, post.Domain = "torvaldsfan", 2143, 342, now.Add(-5*time.Hour), "kernel.org"
@@ -125,7 +125,7 @@ func (d *DemoStore) MoreChildren(_ context.Context, _ string, ids []string, _ re
 	var th reddit.Things
 	for i, id := range ids {
 		th.Comments = append(th.Comments, &reddit.Comment{ID: id, Fullname: "t1_" + id, ParentFullname: "t1_c1",
-			Author: "demo_user_" + id, Body: "Demo reply number " + itoa(i+1) + ", loaded on request.", Score: 3 - i, Created: d.now().Add(-time.Hour)})
+			Author: "demo_user_" + id, Body: "Demo reply number " + itoa(i+1) + ", loaded on request.", Score: 3 - i, Created: d.now().Add(-time.Hour), StatsKnown: true})
 	}
 	return th, nil
 }

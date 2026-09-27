@@ -35,6 +35,9 @@ func TestParseListing(t *testing.T) {
 	if !p.Created.Equal(time.Unix(1790400000, 0)) {
 		t.Errorf("created = %v", p.Created)
 	}
+	if !p.StatsKnown {
+		t.Error("API posts carry scores and comment counts, so StatsKnown must be true")
+	}
 	q := l.Posts[1]
 	if !q.IsSelf || !q.Stickied || q.Distinguished != "moderator" || q.SelfText != "Ask **anything** here." {
 		t.Errorf("post 1 = %+v", q)
@@ -70,6 +73,9 @@ func TestParseThread(t *testing.T) {
 	}
 	if !c1.Children[0].IsSubmitter {
 		t.Error("c2 should be submitter")
+	}
+	if !c1.StatsKnown || !c1.Children[0].StatsKnown {
+		t.Error("API comments carry scores, so StatsKnown must be true")
 	}
 	if c1.More == nil || c1.More.Count != 3 || len(c1.More.IDs) != 3 || c1.More.ParentFullname != "t1_c1" {
 		t.Errorf("c1 more = %+v", c1.More)

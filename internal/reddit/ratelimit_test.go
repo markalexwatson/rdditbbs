@@ -101,6 +101,26 @@ func TestWaitForPrefersRetryAfter(t *testing.T) {
 	}
 }
 
+func TestTryAcquireNeverWaits(t *testing.T) {
+	clock := &fakeClock{t: time.Unix(1_790_000_000, 0)}
+	sl := &fakeSleeper{clock: clock}
+	g := NewRateGate(clock.Now, sl.Sleep, nil)
+	if !g.TryAcquire() {
+		t.Fatal("fresh gate should have capacity")
+	}
+	g.Release(headers("0", "60"))
+	if g.TryAcquire() {
+		t.Error("exhausted gate must refuse without waiting")
+	}
+	if len(sl.slept) != 0 {
+		t.Errorf("TryAcquire slept %v", sl.slept)
+	}
+	clock.Advance(61 * time.Second)
+	if !g.TryAcquire() {
+		t.Error("after the reset TryAcquire should succeed")
+	}
+}
+
 func TestWaitForFallsBackToKnownReset(t *testing.T) {
 	clock := &fakeClock{t: time.Unix(1_790_000_000, 0)}
 	g := NewRateGate(clock.Now, nil, nil)
