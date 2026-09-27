@@ -74,7 +74,7 @@ func (s *PostList) Init() ui.Action {
 func (s *PostList) Title() string { return "Message Area" }
 
 func (s *PostList) Info() string {
-	return fmt.Sprintf("r/%s · %s · Page %d", s.area.Subreddit, strings.ToUpper(string(s.reqSort)), s.page()+1)
+	return fmt.Sprintf("r/%s · %s · Page %d", s.area.Subreddit, strings.ToUpper(string(s.reqSort)), s.page()+1) + s.d.sourceTag()
 }
 
 func (s *PostList) Keys() []ui.KeyHelp {
@@ -309,9 +309,13 @@ func (s *PostList) Draw(c term.Canvas) {
 		}
 		x += subjW + 2
 		x += c.Text(x, y, textfmt.PadRight(p.Author, fromW)+"  ", st(theme.Author), w)
-		x += c.Text(x, y, textfmt.PadLeft(itoa(p.NumComments), msgsW), st(theme.Body), w)
+		msgs, score := itoa(p.NumComments), textfmt.Score(p.Score)
+		if !p.StatsKnown {
+			msgs, score = dash, dash
+		}
+		x += c.Text(x, y, textfmt.PadLeft(msgs, msgsW), st(theme.Body), w)
 		if wide {
-			c.Text(x, y, "  "+textfmt.PadLeft(textfmt.Score(p.Score), scoreW)+"  "+textfmt.PadLeft(textfmt.RelTime(p.Created, s.d.now()), ageW), st(theme.Meta), w)
+			c.Text(x, y, "  "+textfmt.PadLeft(score, scoreW)+"  "+textfmt.PadLeft(textfmt.RelTime(p.Created, s.d.now()), ageW), st(theme.Meta), w)
 		}
 	}
 }
@@ -447,6 +451,9 @@ func (s *PostList) open(i int) ui.Action {
 	s.cursor = i
 	s.status = ""
 	s.d.Session.ThreadsOpened++
+	if pf, ok := s.d.Store.(prefetcher); ok && i+1 < len(s.posts) {
+		pf.Prefetch(context.Background(), s.area.Subreddit, s.posts[i+1].ID) // warm the likely next read
+	}
 	return ui.Push{Screen: newThreadIndex(s.d, s.posts[i])}
 }
 

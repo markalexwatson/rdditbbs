@@ -187,3 +187,19 @@ func TestThemeDefaults(t *testing.T) {
 		t.Errorf("defaults = %+v %+v", c.Display, c.Theme)
 	}
 }
+
+func TestSourceSetting(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.toml")
+	os.WriteFile(p, []byte("[reddit]\nsource = \"rss\"\n"), 0o600)
+	c, err := Load(p, noEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Reddit.Source != "rss" {
+		t.Errorf("source = %q", c.Reddit.Source)
+	}
+	d, _ := Load(filepath.Join(t.TempDir(), "config.toml"), noEnv)
+	if d.Reddit.Source != "auto" {
+		t.Errorf("default source = %q, want auto", d.Reddit.Source)
+	}
+}

@@ -34,6 +34,7 @@ type file struct {
 		ClientID     string `toml:"client_id"`
 		ClientSecret string `toml:"client_secret"`
 		UserAgent    string `toml:"user_agent"`
+		Source       string `toml:"source"` // auto, api or rss
 	} `toml:"reddit"`
 	Display struct {
 		PeekPane    bool   `toml:"peek_pane"`
@@ -77,6 +78,7 @@ func Load(path string, getenv func(string) string) (*Config, error) {
 	c.Display.PeekPane = true
 	c.Display.DefaultSort = "hot"
 	c.Reddit.UserAgent = DefaultUserAgent
+	c.Reddit.Source = "auto"
 	data, err := os.ReadFile(path)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
@@ -91,6 +93,9 @@ func Load(path string, getenv func(string) string) (*Config, error) {
 		}
 		if c.Display.DefaultSort == "" {
 			c.Display.DefaultSort = "hot"
+		}
+		if c.Reddit.Source == "" {
+			c.Reddit.Source = "auto"
 		}
 	}
 	if c.Display.Theme == "" {

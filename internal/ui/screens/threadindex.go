@@ -81,7 +81,14 @@ func (t *ThreadIndex) Init() ui.Action { return t.fetch(false) }
 func (t *ThreadIndex) Title() string   { return "Thread Index" }
 
 func (t *ThreadIndex) Info() string {
-	return fmt.Sprintf("r/%s · %s · %d msgs", t.post.Subreddit, strings.ToUpper(string(t.reqSort)), t.post.NumComments)
+	msgs := itoa(t.post.NumComments)
+	if !t.post.StatsKnown {
+		msgs = dash
+		if t.model != nil {
+			msgs = itoa(t.model.Loaded())
+		}
+	}
+	return fmt.Sprintf("r/%s · %s · %s msgs", t.post.Subreddit, strings.ToUpper(string(t.reqSort)), msgs) + t.d.sourceTag()
 }
 
 func (t *ThreadIndex) Keys() []ui.KeyHelp {
@@ -212,6 +219,12 @@ func (t *ThreadIndex) Draw(c term.Canvas) {
 	p := t.post
 	c.Text(2, 0, textfmt.Truncate(p.Title, w-4), theme.Style(theme.Subject), w-4)
 	meta := fmt.Sprintf("by %s · %s · %s · %d comments", p.Author, textfmt.Score(p.Score), textfmt.RelTime(p.Created, t.d.now()), p.NumComments)
+	if !p.StatsKnown {
+		meta = fmt.Sprintf("by %s · %s", p.Author, textfmt.RelTime(p.Created, t.d.now()))
+		if !p.IsSelf {
+			meta += " · " + p.Domain
+		}
+	}
 	c.Text(2, 1, textfmt.Truncate(meta, w-4), theme.Style(theme.Meta), w-4)
 	if t.model == nil {
 		return
@@ -225,7 +238,7 @@ func (t *ThreadIndex) Draw(c term.Canvas) {
 	// Row budget: header 2, preview, rule, table heading + rows, [rule, peek].
 	var preview []textfmt.Line
 	previewRows := 0
-	if p.IsSelf && p.SelfText != "" {
+	if p.SelfText != "" {
 		preview = textfmt.Render(p.SelfText, w-4).Lines
 		previewRows = len(preview)
 		if previewRows > h/4 {
@@ -304,7 +317,11 @@ func (t *ThreadIndex) Draw(c term.Canvas) {
 			continue
 		}
 		cm := row.Comment
-		x += c.Text(x, ry, textfmt.PadLeft(textfmt.Score(cm.Score), scoreColW)+"  ", st(theme.Meta), w)
+		score := textfmt.Score(cm.Score)
+		if !cm.StatsKnown {
+			score = dash
+		}
+		x += c.Text(x, ry, textfmt.PadLeft(score, scoreColW)+"  ", st(theme.Meta), w)
 		author, role := authorAndRole(cm, p)
 		name := row.Connector + author
 		if row.Collapsed {
@@ -352,7 +369,11 @@ func (t *ThreadIndex) drawPeek(c term.Canvas, y, w, rows int) {
 	author, role := authorAndRole(cm, t.post)
 	x := 2
 	x += c.Text(x, y, author, theme.Style(role), w-4)
-	c.Text(x, y, " · "+textfmt.Score(cm.Score)+" · "+textfmt.RelTime(cm.Created, t.d.now()), theme.Style(theme.Meta), w-2-x)
+	meta := " · " + textfmt.RelTime(cm.Created, t.d.now())
+	if cm.StatsKnown {
+		meta = " · " + textfmt.Score(cm.Score) + meta
+	}
+	c.Text(x, y, meta, theme.Style(theme.Meta), w-2-x)
 	lines := textfmt.Render(cm.Body, w-4).Lines
 	bodyRows := rows - 1
 	if max := len(lines) - bodyRows; t.peekTop > max {
@@ -400,6 +421,10 @@ func (t *ThreadIndex) HandleKey(k term.Key) ui.Action {
 			return ui.Push{Screen: newReader(t.d, t.model, "")}
 		}
 	case Rune(k) == 'S':
+		if t.d.Source == "rss" {
+			t.status, t.statusErr = "Sorting is not available in RSS mode", false
+			return nil
+		}
 		t.reqSort = t.reqSort.Next()
 		return t.fetch(false)
 	case Rune(k) == 'L':

@@ -45,8 +45,11 @@ func (s *Splash) Draw(c term.Canvas) {
 	widgets.Centre(c, y, "A bulletin board window onto Reddit", theme.Style(theme.Subject))
 	widgets.Centre(c, y+2, "Node 1  ·  "+s.d.now().Format("02/01/2006 15:04")+"  ·  v"+s.d.Version, theme.Style(theme.Meta))
 	widgets.Centre(c, y+4, "Press any key to log on", theme.Style(theme.Hotkey))
-	if s.d.Demo {
+	switch {
+	case s.d.Demo:
 		widgets.Centre(c, y+6, "DEMO MODE: sample data, nothing is fetched from Reddit", theme.Style(theme.Error))
+	case s.d.Source == "rss":
+		widgets.Centre(c, y+6, "RSS MODE: public feeds, no scores or threading, about one fetch a minute", theme.Style(theme.Error))
 	}
 }
 

@@ -62,8 +62,8 @@ approval under its Responsible Builder Policy, and access has been requested
 for the author's own account only. The source is published so that request
 can be reviewed; the repository contains no credentials and the program is
 not offered as a general Reddit client. If you build it yourself, the only
-mode that works without Reddit's approval is `--demo`, which browses
-built-in sample data.
+modes that work without Reddit's approval are `--demo`, which browses
+built-in sample data, and RSS mode (see below).
 
 ## Building
 
@@ -76,6 +76,23 @@ with mode 0600. `RDDITBBS_CLIENT_ID` and `RDDITBBS_CLIENT_SECRET` override
 the file and are never written to disk. `--config PATH` uses another file.
 `--debug` saves the last unparseable API response to
 `~/.local/state/rdditbbs/last-error.json`.
+
+## RSS mode
+
+Without approved credentials the program falls back to Reddit's public Atom
+feeds, which need no registration. `--rss` forces it; `[reddit] source =
+"api"` or `"rss"` in the config pins it (the default `auto` uses the API
+when credentials exist). The title bar shows `RSS` so the mode is never in
+doubt. What changes:
+
+- No scores or comment counts; those columns show `–`.
+- Comments arrive flat, in feed order, with no threading, folding or
+  "load more". Sorting comments is not available.
+- Reddit allows roughly one feed request a minute per address. Listings
+  are cached for 10 minutes and threads for 15, and while you read one
+  thread the next post's thread is prefetched if the allowance permits,
+  so browsing in order feels quicker than jumping about. When you do have
+  to wait, the status line shows the countdown.
 
 ## Keys
 

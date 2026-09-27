@@ -196,3 +196,27 @@ func TestThreadIndexPartialMoreResultsAttached(t *testing.T) {
 	pump(t, app)
 	mustContain(t, sim, "xorg4life", "Reddit is having trouble", "[load 2 more replies]")
 }
+
+func TestThreadIndexRSSModeFlatAndUnscored(t *testing.T) {
+	d, fs := newDeps(t)
+	d.Source = "rss"
+	th := redditest.SampleThread()
+	th.Post.StatsKnown = false
+	th.Post.IsSelf = false
+	th.Post.SelfText = "An image post with a caption."
+	th.More = nil
+	for _, c := range th.Comments {
+		c.StatsKnown = false
+		c.Children, c.More = nil, nil
+	}
+	fs.Threads["aaa"] = th
+	app, sim := run(t, NewThreadIndex(d, th.Post))
+	pump(t, app)
+	mustContain(t, sim, "· RSS", "An image post with a caption.", "sched_nerd")
+	mustNotContain(t, sim, "412", "2.1k", "342 comments", "[load")
+	press(app, term.R('s'))
+	mustContain(t, sim, "Sorting is not available in RSS mode")
+	if fs.CallCount() != 1 {
+		t.Errorf("S must not refetch in RSS mode, calls = %d", fs.CallCount())
+	}
+}

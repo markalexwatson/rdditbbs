@@ -26,8 +26,26 @@ type Deps struct {
 	Open      func(url string, onExit func(error)) error
 	Now       func() time.Time
 	Version   string
-	Demo      bool // sample data, no credentials: skip setup and say so on the splash
+	Demo      bool   // sample data, no credentials: skip setup and say so on the splash
+	Source    string // "api", "rss" or "demo": shown in the title bar when not the API
 }
+
+// sourceTag is the title-bar suffix for non-API sources.
+func (d *Deps) sourceTag() string {
+	if d.Source == "" || d.Source == "api" {
+		return ""
+	}
+	return " · " + strings.ToUpper(d.Source)
+}
+
+// prefetcher is implemented by stores that can warm their cache in the
+// background without delaying foreground requests.
+type prefetcher interface {
+	Prefetch(ctx context.Context, subreddit, postID string) bool
+}
+
+// dash stands in for a number the source does not provide.
+const dash = "–"
 
 // SelectComment is the Pop result Message Reader hands back to Thread Index.
 type SelectComment struct{ ID string }

@@ -16,6 +16,7 @@ import (
 	"github.com/markalexwatson/rdditbbs/internal/config"
 	"github.com/markalexwatson/rdditbbs/internal/reddit"
 	"github.com/markalexwatson/rdditbbs/internal/reddit/redditest"
+	"github.com/markalexwatson/rdditbbs/internal/rss"
 	"github.com/markalexwatson/rdditbbs/internal/session"
 	"github.com/markalexwatson/rdditbbs/internal/term"
 	"github.com/markalexwatson/rdditbbs/internal/theme"
@@ -37,6 +38,7 @@ func run(args []string, stdout, stderr io.Writer) (code int) {
 	debugFlag := fs.Bool("debug", false, "save the last unparseable Reddit response to the state directory")
 	showVersion := fs.Bool("version", false, "print the version and exit")
 	demo := fs.Bool("demo", false, "browse built-in sample data without Reddit credentials")
+	rssFlag := fs.Bool("rss", false, "read Reddit's public feeds instead of the API (no credentials, no scores, flat comments)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -63,6 +65,13 @@ func run(args []string, stdout, stderr io.Writer) (code int) {
 		fmt.Fprintln(stderr, "rdditbbs: config:", err)
 		return 2
 	}
+	switch cfg.Reddit.Source {
+	case "auto", "api", "rss":
+	default:
+		fmt.Fprintf(stderr, "rdditbbs: config: reddit.source must be auto, api or rss, not %q\n", cfg.Reddit.Source)
+		return 2
+	}
+	source := chooseSource(cfg, *rssFlag, *demo)
 
 	t, err := term.NewTcell()
 	if err != nil {
@@ -99,10 +108,22 @@ func run(args []string, stdout, stderr io.Writer) (code int) {
 		}
 		return reddit.NewClient(reddit.Credentials{ClientID: id, ClientSecret: secret, UserAgent: cfg.Reddit.UserAgent}, opts...)
 	}
-	if cfg.HasCredentials() {
-		deps.Store = deps.MakeStore(cfg.ClientID(), cfg.ClientSecret())
-	}
-	if *demo {
+	deps.Source = source
+	switch source {
+	case "api":
+		if cfg.HasCredentials() {
+			deps.Store = deps.MakeStore(cfg.ClientID(), cfg.ClientSecret())
+		}
+	case "rss":
+		deps.Store = rss.NewClient(cfg.Reddit.UserAgent, rss.WithOnWait(func(d time.Duration) {
+			if app != nil {
+				app.Post(ui.RateLimited{Wait: d})
+			}
+		}))
+		if len(cfg.Areas) == 0 {
+			cfg.Areas = append([]config.Area(nil), config.DefaultAreas...)
+		}
+	case "demo":
 		deps.Demo = true
 		deps.Store = redditest.NewDemoStore(time.Now)
 		if len(cfg.Areas) == 0 {
@@ -124,6 +145,24 @@ func run(args []string, stdout, stderr io.Writer) (code int) {
 }
 
 var badResponseMu sync.Mutex
+
+// chooseSource decides where posts come from: demo when asked, rss when
+// forced by flag or config, api when pinned, otherwise the API if credentials
+// exist and the feeds if not.
+func chooseSource(cfg *config.Config, rssFlag, demo bool) string {
+	switch {
+	case demo:
+		return "demo"
+	case rssFlag, cfg.Reddit.Source == "rss":
+		return "rss"
+	case cfg.Reddit.Source == "api":
+		return "api"
+	case cfg.HasCredentials():
+		return "api"
+	default:
+		return "rss"
+	}
+}
 
 // applyTheme registers the [theme] table as the "custom" theme when it has
 // overrides, then activates the theme named in [display].

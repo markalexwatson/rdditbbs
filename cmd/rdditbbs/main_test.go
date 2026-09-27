@@ -99,3 +99,46 @@ func TestApplyThemeRegistersCustomAndSelects(t *testing.T) {
 		t.Error("selecting custom without a [theme] table should fail")
 	}
 }
+
+func TestChooseSource(t *testing.T) {
+	withCreds := &config.Config{}
+	withCreds.SetCredentials("id", "secret")
+	withCreds.Reddit.Source = "auto"
+	noCreds := &config.Config{}
+	noCreds.Reddit.Source = "auto"
+	pinnedAPI := &config.Config{}
+	pinnedAPI.Reddit.Source = "api"
+	pinnedRSS := &config.Config{}
+	pinnedRSS.SetCredentials("id", "secret")
+	pinnedRSS.Reddit.Source = "rss"
+	cases := []struct {
+		name string
+		cfg  *config.Config
+		rss  bool
+		demo bool
+		want string
+	}{
+		{"auto with credentials", withCreds, false, false, "api"},
+		{"auto without credentials", noCreds, false, false, "rss"},
+		{"flag forces rss", withCreds, true, false, "rss"},
+		{"config pins rss", pinnedRSS, false, false, "rss"},
+		{"config pins api without credentials", pinnedAPI, false, false, "api"},
+		{"demo wins", withCreds, true, true, "demo"},
+	}
+	for _, c := range cases {
+		if got := chooseSource(c.cfg, c.rss, c.demo); got != c.want {
+			t.Errorf("%s: got %q want %q", c.name, got, c.want)
+		}
+	}
+}
+
+func TestRunRejectsUnknownSource(t *testing.T) {
+	path := t.TempDir() + "/config.toml"
+	if err := writeFile(path, "[reddit]\nsource = \"carrier pigeon\"\n"); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	if code := run([]string{"--config", path}, &out, &errb); code != 2 || !strings.Contains(errb.String(), "source") {
+		t.Errorf("code = %d stderr = %q", code, errb.String())
+	}
+}

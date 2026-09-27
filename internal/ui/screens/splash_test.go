@@ -37,3 +37,10 @@ func TestSplashDemoModeSkipsSetup(t *testing.T) {
 		t.Errorf("demo mode should go straight to the menu, got %T", app.Top())
 	}
 }
+
+func TestSplashShowsRSSMode(t *testing.T) {
+	d, _ := newDeps(t)
+	d.Source = "rss"
+	_, sim := run(t, NewSplash(d))
+	mustContain(t, sim, "RSS MODE")
+}

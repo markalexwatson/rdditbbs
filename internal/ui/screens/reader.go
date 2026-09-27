@@ -110,10 +110,14 @@ func (r *Reader) bodyText() string {
 	cm := r.current()
 	if cm == nil {
 		p := r.model.Post()
-		if p.IsSelf {
+		switch {
+		case p.IsSelf:
 			return p.SelfText
+		case p.SelfText != "":
+			return "Link: " + p.URL + "\n\n" + p.SelfText
+		default:
+			return "Link post: " + p.URL
 		}
-		return "Link post: " + p.URL
 	}
 	return cm.Body
 }
@@ -157,15 +161,17 @@ func (r *Reader) Draw(c term.Canvas) {
 	c.Text(2, 0, "Subj: ", hd, w)
 	c.Text(8, 0, textfmt.Truncate(p.Title, w-10), theme.Style(theme.Subject), w-10)
 
-	author, role, score, created := p.Author, theme.OP, p.Score, p.Created
+	author, role, score, created, known := p.Author, theme.OP, p.Score, p.Created, p.StatsKnown
 	if cm != nil {
 		author, role = authorAndRole(cm, p)
-		score, created = cm.Score, cm.Created
+		score, created, known = cm.Score, cm.Created, cm.StatsKnown
 	}
 	x := 2
 	x += c.Text(x, 1, "From: ", hd, w)
 	x += c.Text(x, 1, author, theme.Style(role), w)
-	c.Text(x, 1, " ("+signed(score)+")", theme.Style(theme.Meta), w-x)
+	if known {
+		c.Text(x, 1, " ("+signed(score)+")", theme.Style(theme.Meta), w-x)
+	}
 	date := "Date: " + created.Local().Format("02/01/06 15:04")
 	c.Text(w-2-textfmt.Width(date), 1, date, theme.Style(theme.Meta), w)
 

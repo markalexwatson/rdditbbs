@@ -182,3 +182,19 @@ func TestReaderIgnoresPostMoreStubForReplies(t *testing.T) {
 	press(app, term.R('r'))
 	mustContain(t, sim, "No loaded replies")
 }
+
+func TestReaderUnknownScoreAndLinkPostWithCaption(t *testing.T) {
+	d, _ := newDeps(t)
+	th := redditest.SampleThread()
+	th.Post.IsSelf = false
+	th.Post.SelfText = "Caption text under the image."
+	th.Post.StatsKnown = false
+	th.Comments[0].StatsKnown = false
+	m := threadmodel.New(th, 10)
+	app, sim := run(t, NewReader(d, m, ""))
+	mustContain(t, sim, "Link: https://example.com/aaa", "Caption text under the image.")
+	mustNotContain(t, sim, "(+")
+	press(app, term.R('n'))
+	mustContain(t, sim, "From: sched_nerd")
+	mustNotContain(t, sim, "(+412)")
+}

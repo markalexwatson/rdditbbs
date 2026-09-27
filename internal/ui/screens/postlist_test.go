@@ -1,6 +1,7 @@
 package screens
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -318,5 +319,49 @@ func TestPostListCursorCycleEnds(t *testing.T) {
 	mustContain(t, sim, "End of messages")
 	if fs.CallCount() != 3 {
 		t.Errorf("a repeated cursor must end paging; calls = %d", fs.CallCount())
+	}
+}
+
+func TestPostListUnknownStatsShowDashes(t *testing.T) {
+	d, fs := newDeps(t)
+	d.Source = "rss"
+	l := redditest.SampleListing(2, "")
+	l.Posts[0].StatsKnown = false
+	fs.Listings["linux/hot/"] = l
+	sim := term.NewSim(100, 24)
+	app := ui.New(sim, NewPostList(d, linuxArea, true))
+	app.Draw()
+	pump(t, app)
+	row := sim.Row(5)
+	if !strings.Contains(row, "Post 1") || !strings.Contains(row, "–") {
+		t.Errorf("unknown msgs and score should show dashes: %q", row)
+	}
+	if !strings.Contains(sim.Row(6), "10") {
+		t.Errorf("known stats still shown: %q", sim.Row(6))
+	}
+	mustContain(t, sim, "· RSS")
+}
+
+type prefetchStore struct {
+	*redditest.FakeStore
+	prefetched []string
+}
+
+func (p *prefetchStore) Prefetch(_ context.Context, sub, id string) bool {
+	p.prefetched = append(p.prefetched, sub+"/"+id)
+	return true
+}
+
+func TestPostListPrefetchesNextThread(t *testing.T) {
+	d, fs := newDeps(t)
+	fs.Listings["linux/hot/"] = redditest.SampleListing(3, "")
+	fs.Threads["p1"] = redditest.SampleThread()
+	ps := &prefetchStore{FakeStore: fs}
+	d.Store = ps
+	app, _ := run(t, NewPostList(d, linuxArea, true))
+	pump(t, app)
+	press(app, term.K(term.KeyEnter))
+	if len(ps.prefetched) != 1 || ps.prefetched[0] != "linux/p2" {
+		t.Errorf("opening post 1 should prefetch post 2's thread, got %v", ps.prefetched)
 	}
 }
