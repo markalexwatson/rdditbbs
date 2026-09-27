@@ -171,3 +171,41 @@ func TestSetAllowance(t *testing.T) {
 		t.Error("after the reset one unit is available again")
 	}
 }
+
+func TestBackgroundYieldsToWaitingForeground(t *testing.T) {
+	clock := &fakeClock{t: time.Unix(1_790_000_000, 0)}
+	sl := &fakeSleeper{clock: clock}
+	g := NewRateGate(clock.Now, sl.Sleep, nil)
+	g.SetAllowance(1)
+	g.AddWaiter(1) // a reader is waiting
+	if g.Waiting() != 1 || g.TryAcquireIdle() {
+		t.Error("background work must not take the allowance while a reader waits")
+	}
+	g.AddWaiter(-1)
+	if !g.TryAcquireIdle() {
+		t.Error("with no reader waiting the background may proceed")
+	}
+}
+
+func TestBlockUntilAndState(t *testing.T) {
+	clock := &fakeClock{t: time.Unix(1_790_000_000, 0)}
+	sl := &fakeSleeper{clock: clock}
+	g := NewRateGate(clock.Now, sl.Sleep, nil)
+	g.SetAllowance(1)
+	until := clock.Now().Add(40 * time.Second)
+	g.BlockUntil(until)
+	if g.TryAcquire() {
+		t.Error("a blocked gate must refuse")
+	}
+	if rem, reset := g.State(); rem != 0 || !reset.Equal(until) {
+		t.Errorf("state = %v %v", rem, reset)
+	}
+	g.BlockUntil(clock.Now().Add(10 * time.Second)) // an earlier time must not shorten the block
+	if _, reset := g.State(); !reset.Equal(until) {
+		t.Errorf("an earlier block shortened the window: %v", reset)
+	}
+	clock.Advance(41 * time.Second)
+	if !g.TryAcquire() {
+		t.Error("the block should lift at the reset")
+	}
+}

@@ -25,6 +25,7 @@ type RateGate struct {
 	remaining float64
 	reset     time.Time
 	inflight  int
+	waiters   int // foreground callers inside Acquire, which background work yields to
 }
 
 // NewRateGate creates a gate. sleep defaults to SleepContext; onWait may be nil.
@@ -61,8 +62,11 @@ func SleepContext(ctx context.Context, d time.Duration) error {
 	}
 }
 
-// Acquire blocks until a request may be sent, then reserves a unit.
+// Acquire blocks until a request may be sent, then reserves a unit. While it
+// waits it counts as a waiter, which TryAcquireIdle respects.
 func (g *RateGate) Acquire(ctx context.Context) error {
+	g.AddWaiter(1)
+	defer g.AddWaiter(-1)
 	for {
 		g.mu.Lock()
 		now := g.now()
@@ -87,6 +91,59 @@ func (g *RateGate) Acquire(ctx context.Context) error {
 			return err
 		}
 	}
+}
+
+// AddWaiter adjusts the count of foreground callers waiting for the
+// allowance. Acquire does this itself; it is exported for coordination
+// between components and for tests.
+func (g *RateGate) AddWaiter(delta int) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.waiters += delta
+	if g.waiters < 0 {
+		g.waiters = 0
+	}
+}
+
+// Waiting is the number of foreground callers waiting for the allowance.
+func (g *RateGate) Waiting() int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.waiters
+}
+
+// TryAcquireIdle is TryAcquire for background work: it refuses whenever a
+// foreground caller is waiting, checked under the same lock as the
+// reservation so a reader can never be overtaken.
+func (g *RateGate) TryAcquireIdle() bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.waiters > 0 {
+		return false
+	}
+	return g.tryLocked()
+}
+
+// BlockUntil records that the allowance is spent until t, as learned from
+// elsewhere (another process sharing the address). It never shortens a
+// window already known.
+func (g *RateGate) BlockUntil(t time.Time) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if !t.After(g.now()) {
+		return
+	}
+	g.remaining = 0
+	if t.After(g.reset) {
+		g.reset = t
+	}
+}
+
+// State reports the remaining allowance and when the window resets.
+func (g *RateGate) State() (remaining float64, reset time.Time) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.remaining, g.reset
 }
 
 // Unreserve gives back a reservation that was never used for a request.
@@ -117,6 +174,10 @@ func (g *RateGate) UntilReset() time.Duration {
 func (g *RateGate) TryAcquire() bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	return g.tryLocked()
+}
+
+func (g *RateGate) tryLocked() bool {
 	now := g.now()
 	if !g.reset.IsZero() && !now.Before(g.reset) {
 		g.remaining = g.allowance

@@ -118,7 +118,7 @@ func (c *Client) age(u string) (time.Duration, bool) {
 	if c.disk == nil {
 		return 0, false
 	}
-	_, fetched, ok := c.disk.Get(c.key(u))
+	fetched, ok := c.disk.Fetched(c.key(u))
 	if !ok {
 		return 0, false
 	}
@@ -188,7 +188,11 @@ func (c *Client) fromDisk(u string, ttl time.Duration, validate func([]byte) err
 	if age < ttl {
 		c.cache.Put(u, b, ttl-age)
 	} else {
-		c.cache.Put(u, b, staleHold)
+		hold := staleHold
+		if left := maxAge - age; left < hold {
+			hold = left // never keep an entry in memory past its maximum age
+		}
+		c.cache.Put(u, b, hold)
 		c.enqueue(job{url: u, ttl: ttl, validate: validate})
 	}
 	return b, true

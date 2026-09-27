@@ -74,3 +74,73 @@ func TestDiskPruneAndStats(t *testing.T) {
 		t.Error("two entries should remain")
 	}
 }
+
+func TestDiskDoesNotReplaceNewerEntry(t *testing.T) {
+	d, _ := NewDisk(t.TempDir())
+	now := time.Unix(1_790_000_000, 0)
+	d.Put("k", []byte("new"), now)
+	d.Put("k", []byte("old"), now.Add(-time.Hour))
+	if b, fetched, _ := d.Get("k"); string(b) != "new" || !fetched.Equal(now) {
+		t.Errorf("an older fetch overwrote a newer one: %q %v", b, fetched)
+	}
+}
+
+func TestDiskIndexAvoidsReadingBodies(t *testing.T) {
+	dir := t.TempDir()
+	d, _ := NewDisk(dir)
+	now := time.Unix(1_790_000_000, 0)
+	d.Put("/r/linux/comments/abc/.rss?limit=500", []byte("body"), now)
+	// Make the body unreadable as a whole file would be; the header line stays.
+	entries, _ := os.ReadDir(dir)
+	p := filepath.Join(dir, entries[0].Name())
+	raw, _ := os.ReadFile(p)
+	os.WriteFile(p, raw[:len(raw)-2], 0o600)
+	if fetched, ok := d.Fetched("/r/linux/comments/abc/.rss?limit=500"); !ok || !fetched.Equal(now) {
+		t.Errorf("Fetched should come from the index: %v %v", fetched, ok)
+	}
+	if st := d.Stats(now); st.Threads != 1 || st.Entries != 1 {
+		t.Errorf("stats = %+v", st)
+	}
+}
+
+func TestDiskSeesEntriesWrittenByAnotherProcess(t *testing.T) {
+	dir := t.TempDir()
+	a, _ := NewDisk(dir)
+	b, _ := NewDisk(dir) // stands in for a separate sync process
+	now := time.Unix(1_790_000_000, 0)
+	b.Put("k", []byte("from the other process"), now)
+	a.Rescan()
+	if body, _, ok := a.Get("k"); !ok || string(body) != "from the other process" {
+		t.Errorf("entry written elsewhere not visible: %q %v", body, ok)
+	}
+}
+
+func TestPruneRemovesOldCorruptAndAbandonedFiles(t *testing.T) {
+	dir := t.TempDir()
+	d, _ := NewDisk(dir)
+	now := time.Unix(1_790_000_000, 0)
+	d.Put("fresh", []byte("x"), now.Add(-time.Hour))
+	d.Put("old", []byte("x"), now.Add(-30*time.Hour))
+	d.Put("future", []byte("x"), now.Add(48*time.Hour)) // an implausible timestamp
+	os.WriteFile(filepath.Join(dir, "garbage.feed"), []byte("not a cache file"), 0o600)
+	tmp := filepath.Join(dir, ".put-123.tmp")
+	os.WriteFile(tmp, []byte("half written"), 0o600)
+	os.Chtimes(tmp, now.Add(-3*time.Hour), now.Add(-3*time.Hour))
+	if removed := d.PruneAt(now, 24*time.Hour, 1000); removed != 4 {
+		t.Errorf("removed %d, want 4 (old, future, garbage, abandoned temp)", removed)
+	}
+	left, _ := os.ReadDir(dir)
+	if len(left) != 1 {
+		t.Errorf("one file should remain, have %d", len(left))
+	}
+	for i := 0; i < 5; i++ {
+		d.Put("k"+string(rune('a'+i)), []byte("x"), now.Add(-time.Duration(i)*time.Minute))
+	}
+	d.PruneAt(now, 24*time.Hour, 3)
+	if n := d.Stats(now).Entries; n != 3 {
+		t.Errorf("the count cap should keep the three newest, have %d", n)
+	}
+	if _, ok := d.Fetched("ka"); !ok {
+		t.Error("the newest entry must survive the cap")
+	}
+}
